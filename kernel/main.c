@@ -6,7 +6,7 @@
 
 volatile static int started = 0;
 
-// start() jumps here in supervisor mode on all CPUs.
+// start() jumps here in kernel mode (ring 0) on all CPUs.
 void
 main()
 {
