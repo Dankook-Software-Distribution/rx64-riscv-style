@@ -1,4 +1,37 @@
+// x86-64 control registers and model-specific registers.
+// these are plain numbers (no C integer suffixes) so that
+// assembly files such as entry.S can use them too.
+
+#define CR0_PE 0x00000001 // protected mode enable
+#define CR0_WP 0x00010000 // kernel obeys read-only PTEs too
+#define CR0_PG 0x80000000 // paging enable
+
+#define CR4_PAE 0x00000020 // physical address extension (64-bit PTEs)
+
+#define FL_IF 0x00000200 // rflags: interrupt enable
+
+#define MSR_EFER 0xc0000080 // extended feature enable register
+#define EFER_LME 0x00000100 // long mode enable
+#define EFER_NXE 0x00000800 // no-execute PTE bit enable
+
 #ifndef __ASSEMBLER__
+
+// x86 devices such as the UART are reached through
+// a separate I/O port address space, with in/out
+// instructions instead of loads and stores.
+static inline uchar
+inb(ushort port)
+{
+  uchar x;
+  asm volatile("inb %1, %0" : "=a"(x) : "d"(port));
+  return x;
+}
+
+static inline void
+outb(ushort port, uchar x)
+{
+  asm volatile("outb %0, %1" : : "a"(x), "d"(port));
+}
 
 // which hart (core) is this?
 static inline uint64
@@ -71,13 +104,6 @@ static inline void
 c_sstatus(uint64 x)
 {
   __asm__ __volatile__("csrc sstatus, %0" ::"rK"(x) : "memory");
-}
-
-static inline uint64
-rc_sstatus(uint64 x)
-{
-  __asm__ __volatile__("csrrc %0, sstatus, %1" : "=r"(x) : "rK"(x) : "memory");
-  return x;
 }
 
 // Supervisor Interrupt Pending
@@ -305,26 +331,34 @@ r_time()
   return x;
 }
 
+static inline uint64
+r_rflags()
+{
+  uint64 x;
+  asm volatile("pushfq; popq %0" : "=r"(x));
+  return x;
+}
+
 // enable device interrupts
 static inline void
 intr_on()
 {
-  s_sstatus(SSTATUS_SIE);
+  asm volatile("sti" ::: "memory");
 }
 
 // disable device interrupts
 static inline void
 intr_off()
 {
-  c_sstatus(SSTATUS_SIE);
+  asm volatile("cli" ::: "memory");
 }
 
 // are device interrupts enabled?
 static inline int
 intr_get()
 {
-  uint64 x = r_sstatus();
-  return (x & SSTATUS_SIE) != 0;
+  uint64 x = r_rflags();
+  return (x & FL_IF) != 0;
 }
 
 static inline uint64

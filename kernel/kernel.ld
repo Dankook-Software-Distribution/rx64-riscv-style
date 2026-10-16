@@ -1,13 +1,16 @@
-OUTPUT_ARCH( "riscv" )
+OUTPUT_FORMAT( "elf64-x86-64" )
+OUTPUT_ARCH( "i386:x86-64" )
 ENTRY( _entry )
 
 SECTIONS
 {
   /*
-   * ensure that entry.S / _entry is at 0x80000000,
-   * where qemu's -kernel jumps.
+   * load the kernel at 0x100000 (1MB), the start of
+   * the RAM above the PC's legacy BIOS and VGA area.
+   * qemu's -kernel jumps to _entry, whose address
+   * entry.S records in a PVH ELF note.
    */
-  . = 0x80000000;
+  . = 0x100000;
 
   .text : {
     kernel/entry.o(_entry)
@@ -22,21 +25,24 @@ SECTIONS
 
   .rodata : {
     . = ALIGN(16);
-    *(.srodata .srodata.*) /* do not need to distinguish this from .rodata */
-    . = ALIGN(16);
     *(.rodata .rodata.*)
   }
 
+  /*
+   * the PVH note tells qemu's -kernel where _entry is.
+   * it must be in a loaded section so that the
+   * linker puts it in a PT_NOTE program header.
+   */
+  .note : {
+    *(.note.Xen)
+  }
+
   .data : {
-    . = ALIGN(16);
-    *(.sdata .sdata.*) /* do not need to distinguish this from .data */
     . = ALIGN(16);
     *(.data .data.*)
   }
 
   .bss : {
-    . = ALIGN(16);
-    *(.sbss .sbss.*) /* do not need to distinguish this from .bss */
     . = ALIGN(16);
     *(.bss .bss.*)
   }

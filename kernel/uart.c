@@ -5,19 +5,17 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "x86.h"
 #include "spinlock.h"
 #include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
 
-// the UART control registers are memory-mapped
-// at address UART0. this macro returns the
-// address of one of the registers.
-#define Reg(reg) ((volatile unsigned char *)(UART0 + (reg)))
-
-#define ReadReg(reg)     (*(Reg(reg)))
-#define WriteReg(reg, v) (*(Reg(reg)) = (v))
+// the UART control registers are at I/O ports
+// starting at UART0, so they are read and written
+// with in/out instructions rather than memory accesses.
+#define ReadReg(reg)     inb(UART0 + (reg))
+#define WriteReg(reg, v) outb(UART0 + (reg), (v))
 
 // the UART control registers.
 // some have different meanings for read vs write.
@@ -34,6 +32,8 @@
 #define LCR             3        // line control register
 #define LCR_EIGHT_BITS  (3 << 0)
 #define LCR_BAUD_LATCH  (1 << 7) // special mode to set baud rate
+#define MCR             4        // modem control register
+#define MCR_OUT2        (1 << 3) // on a PC, connects the UART's interrupt line
 #define LSR             5        // line status register
 #define LSR_RX_READY    (1 << 0) // input is waiting to be read from RHR
 #define LSR_TX_IDLE     (1 << 5) // THR can accept another character to send
@@ -66,6 +66,10 @@ uartinit(void)
 
   // reset and enable FIFOs.
   WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
+
+  // on a PC, the UART's interrupt output reaches the
+  // interrupt controller only while OUT2 is set.
+  WriteReg(MCR, MCR_OUT2);
 
   // enable transmit and receive interrupts.
   WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
