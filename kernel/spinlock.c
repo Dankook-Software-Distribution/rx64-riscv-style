@@ -94,8 +94,12 @@ push_off(void)
 {
   // disable interrupts to prevent an involuntary context
   // switch while using mycpu().
-  uint64 flags = rc_sstatus(SSTATUS_SIE);
-  int old = !!(flags & SSTATUS_SIE);
+  // riscv reads and clears SIE in one instruction (csrrc);
+  // x86 needs two, but an interrupt between them returns
+  // with IF restored, so the value read is still correct.
+  uint64 flags = r_rflags();
+  intr_off();
+  int old = !!(flags & FL_IF);
 
   if (mycpu()->noff == 0)
     mycpu()->intena = old;
