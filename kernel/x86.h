@@ -8,6 +8,8 @@
 
 #define CR4_PAE 0x00000020 // physical address extension (64-bit PTEs)
 
+#define FL_IF 0x00000200 // rflags: interrupt enable
+
 #define MSR_EFER 0xc0000080 // extended feature enable register
 #define EFER_LME 0x00000100 // long mode enable
 #define EFER_NXE 0x00000800 // no-execute PTE bit enable
@@ -102,13 +104,6 @@ static inline void
 c_sstatus(uint64 x)
 {
   __asm__ __volatile__("csrc sstatus, %0" ::"rK"(x) : "memory");
-}
-
-static inline uint64
-rc_sstatus(uint64 x)
-{
-  __asm__ __volatile__("csrrc %0, sstatus, %1" : "=r"(x) : "rK"(x) : "memory");
-  return x;
 }
 
 // Supervisor Interrupt Pending
@@ -336,26 +331,34 @@ r_time()
   return x;
 }
 
+static inline uint64
+r_rflags()
+{
+  uint64 x;
+  asm volatile("pushfq; popq %0" : "=r"(x));
+  return x;
+}
+
 // enable device interrupts
 static inline void
 intr_on()
 {
-  s_sstatus(SSTATUS_SIE);
+  asm volatile("sti" ::: "memory");
 }
 
 // disable device interrupts
 static inline void
 intr_off()
 {
-  c_sstatus(SSTATUS_SIE);
+  asm volatile("cli" ::: "memory");
 }
 
 // are device interrupts enabled?
 static inline int
 intr_get()
 {
-  uint64 x = r_sstatus();
-  return (x & SSTATUS_SIE) != 0;
+  uint64 x = r_rflags();
+  return (x & FL_IF) != 0;
 }
 
 static inline uint64
