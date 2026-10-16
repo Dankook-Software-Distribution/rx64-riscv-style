@@ -1,3 +1,17 @@
+// x86-64 control registers and model-specific registers.
+// these are plain numbers (no C integer suffixes) so that
+// assembly files such as entry.S can use them too.
+
+#define CR0_PE 0x00000001 // protected mode enable
+#define CR0_WP 0x00010000 // kernel obeys read-only PTEs too
+#define CR0_PG 0x80000000 // paging enable
+
+#define CR4_PAE 0x00000020 // physical address extension (64-bit PTEs)
+
+#define MSR_EFER 0xc0000080 // extended feature enable register
+#define EFER_LME 0x00000100 // long mode enable
+#define EFER_NXE 0x00000800 // no-execute PTE bit enable
+
 #ifndef __ASSEMBLER__
 
 // which hart (core) is this?
