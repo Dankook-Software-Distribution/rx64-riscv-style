@@ -14,6 +14,23 @@
 
 #ifndef __ASSEMBLER__
 
+// x86 devices such as the UART are reached through
+// a separate I/O port address space, with in/out
+// instructions instead of loads and stores.
+static inline uchar
+inb(ushort port)
+{
+  uchar x;
+  asm volatile("inb %1, %0" : "=a"(x) : "d"(port));
+  return x;
+}
+
+static inline void
+outb(ushort port, uchar x)
+{
+  asm volatile("outb %0, %1" : : "a"(x), "d"(port));
+}
+
 // which hart (core) is this?
 static inline uint64
 r_mhartid()
