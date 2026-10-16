@@ -41,9 +41,12 @@
 
 // the kernel expects there to be RAM
 // for use by the kernel and user pages
-// from physical address 0x80000000 to PHYSTOP.
-#define KERNBASE 0x80000000L
-#define PHYSTOP  (KERNBASE + 128 * 1024 * 1024)
+// from physical address KERNBASE to PHYSTOP.
+// a PC's RAM starts at 0, but the first 1MB holds
+// the BIOS and other legacy areas, so the kernel
+// starts at 1MB; RAM ends at 128MB (qemu -m 128M).
+#define KERNBASE 0x100000L
+#define PHYSTOP  (128 * 1024 * 1024)
 
 // map the trampoline page to the highest address,
 // in both user and kernel space.
