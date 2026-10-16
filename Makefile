@@ -11,11 +11,6 @@ OBJS = \
   $K/spinlock.o \
   $K/string.o \
   $K/main.o \
-  $K/vm.o \
-  $K/proc.o \
-  $K/swtch.o \
-  $K/trampoline.o \
-  $K/trap.o \
   $K/syscall.o \
   $K/sysproc.o \
   $K/bio.o \
@@ -26,9 +21,18 @@ OBJS = \
   $K/pipe.o \
   $K/exec.o \
   $K/sysfile.o \
-  $K/kernelvec.o \
   $K/plic.o \
-  $K/virtio_disk.o
+  $K/stub.o
+
+# not yet ported to x86-64; kernel/stub.c stands in for them.
+# put each one back in OBJS when it is ported.
+#  $K/vm.o
+#  $K/proc.o
+#  $K/swtch.o
+#  $K/trampoline.o
+#  $K/trap.o
+#  $K/kernelvec.o
+#  $K/virtio_disk.o
 
 # x86_64-elf- or x86_64-linux-gnu-
 # perhaps in /opt/cross/bin
