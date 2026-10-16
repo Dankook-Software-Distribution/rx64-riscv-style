@@ -30,29 +30,25 @@ OBJS = \
   $K/plic.o \
   $K/virtio_disk.o
 
-# riscv64-unknown-elf- or riscv64-linux-gnu-
-# perhaps in /opt/riscv/bin
+# x86_64-elf- or x86_64-linux-gnu-
+# perhaps in /opt/cross/bin
 #TOOLPREFIX = 
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
-TOOLPREFIX := $(shell if riscv64-unknown-elf-objdump -i 2>&1 | grep 'elf64-big' >/dev/null 2>&1; \
-	then echo 'riscv64-unknown-elf-'; \
-	elif riscv64-elf-objdump -i 2>&1 | grep 'elf64-big' >/dev/null 2>&1; \
-	then echo 'riscv64-elf-'; \
-	elif riscv64-none-elf-objdump -i 2>&1 | grep 'elf64-big' >/dev/null 2>&1; \
-	then echo 'riscv64-none-elf-'; \
-	elif riscv64-linux-gnu-objdump -i 2>&1 | grep 'elf64-big' >/dev/null 2>&1; \
-	then echo 'riscv64-linux-gnu-'; \
-	elif riscv64-unknown-linux-gnu-objdump -i 2>&1 | grep 'elf64-big' >/dev/null 2>&1; \
-	then echo 'riscv64-unknown-linux-gnu-'; \
+TOOLPREFIX := $(shell if x86_64-elf-objdump -i 2>&1 | grep 'elf64-x86-64' >/dev/null 2>&1; \
+	then echo 'x86_64-elf-'; \
+	elif x86_64-unknown-elf-objdump -i 2>&1 | grep 'elf64-x86-64' >/dev/null 2>&1; \
+	then echo 'x86_64-unknown-elf-'; \
+	elif x86_64-linux-gnu-objdump -i 2>&1 | grep 'elf64-x86-64' >/dev/null 2>&1; \
+	then echo 'x86_64-linux-gnu-'; \
 	else echo "***" 1>&2; \
-	echo "*** Error: Couldn't find a riscv64 version of GCC/binutils." 1>&2; \
+	echo "*** Error: Couldn't find an x86_64 version of GCC/binutils." 1>&2; \
 	echo "*** To turn off this error, run 'gmake TOOLPREFIX= ...'." 1>&2; \
 	echo "***" 1>&2; exit 1; fi)
 endif
 
-QEMU = qemu-system-riscv64
+QEMU = qemu-system-x86_64
 MIN_QEMU_VERSION = 7.2
 
 CC = $(TOOLPREFIX)gcc
@@ -65,10 +61,17 @@ DETFLAGS = -ffile-prefix-map=$(CURDIR)=.
 
 CFLAGS = -Wall -Werror -Wno-unknown-attributes -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS += $(DETFLAGS)
-CFLAGS += -march=rv64gc
 CFLAGS += -std=gnu99
 CFLAGS += -MD
-CFLAGS += -mcmodel=medany
+# the kernel is linked and runs below 2GB (identity mapped),
+# so 32-bit absolute addresses are enough.
+CFLAGS += -mcmodel=small
+# interrupts and exceptions taken in kernel mode push their frame
+# on the current stack, which would overwrite the red zone.
+CFLAGS += -mno-red-zone
+# the kernel does not save or restore FPU/SSE registers,
+# so neither the kernel nor user programs may use them.
+CFLAGS += -mgeneral-regs-only
 CFLAGS += -ffreestanding
 CFLAGS += -fno-common -nostdlib
 CFLAGS += -fno-builtin-strncpy -fno-builtin-strncmp -fno-builtin-strlen -fno-builtin-memset
@@ -96,7 +99,7 @@ $K/kernel: $(OBJS) $K/kernel.ld
 	$(OBJDUMP) -t $K/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $K/kernel.sym
 
 $K/%.o: $K/%.S
-	$(CC) -march=rv64gc -g $(DETFLAGS) -c -o $@ $<
+	$(CC) -g $(DETFLAGS) -c -o $@ $<
 
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
@@ -174,18 +177,16 @@ ifndef CPUS
 CPUS := 3
 endif
 
-QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nographic
-QEMUOPTS += -global virtio-mmio.force-legacy=false
-QEMUOPTS += -drive file=fs.img,if=none,format=raw,id=x0
-QEMUOPTS += -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
+QEMUOPTS = -machine q35 -kernel $K/kernel -m 128M -smp $(CPUS) -nographic
+QEMUOPTS += -nic none
 
-qemu: check-qemu-version $K/kernel fs.img
+qemu: check-qemu-version $K/kernel
 	$(QEMU) $(QEMUOPTS)
 
-.gdbinit: .gdbinit.tmpl-riscv
+.gdbinit: .gdbinit.tmpl-x86_64
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
 
-qemu-gdb: $K/kernel .gdbinit fs.img
+qemu-gdb: $K/kernel .gdbinit
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
