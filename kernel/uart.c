@@ -5,7 +5,7 @@
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "riscv.h"
+#include "x86.h"
 #include "spinlock.h"
 #include "sleeplock.h"
 #include "proc.h"

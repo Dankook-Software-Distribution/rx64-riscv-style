@@ -4,7 +4,7 @@
 #include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
-#include "riscv.h"
+#include "x86.h"
 #include "proc.h"
 #include "defs.h"
 
