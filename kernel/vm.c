@@ -26,14 +26,13 @@ kvmmake(void)
   kpgtbl = (pagetable_t)kalloc();
   memset(kpgtbl, 0, PGSIZE);
 
-  // uart registers
-  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  // the uart needs no mapping: it is reached through I/O ports.
 
-  // virtio mmio disk interface
-  kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  // IOAPIC
+  kvmmap(kpgtbl, IOAPIC, IOAPIC, PGSIZE, PTE_R | PTE_W);
 
-  // PLIC
-  kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, PTE_R | PTE_W);
+  // LAPIC
+  kvmmap(kpgtbl, LAPIC, LAPIC, PGSIZE, PTE_R | PTE_W);
 
   // map kernel text executable and read-only.
   kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
@@ -70,27 +69,28 @@ kvminit(void)
 }
 
 // Switch the current CPU's h/w page table register to
-// the kernel's page table, and enable paging.
+// the kernel's page table.
+// paging is already on: entry.S had to turn it on with a
+// temporary page table, since x86-64 long mode cannot run
+// without paging.
 void
 kvminithart()
 {
-  // wait for any previous writes to the page table memory to finish.
-  sfence_vma();
-
-  w_satp(MAKE_SATP(kernel_pagetable));
-
-  // flush stale entries from the TLB.
-  sfence_vma();
+  // writing cr3 also flushes stale entries from the TLB.
+  // x86 needs no fence before it: the MMU sees earlier
+  // writes to page table memory.
+  w_cr3((uint64)kernel_pagetable);
 }
 
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
 //
-// The risc-v Sv39 scheme has three levels of page-table
+// The x86-64 four-level scheme has four levels of page-table
 // pages. A page-table page contains 512 64-bit PTEs.
-// A 64-bit virtual address is split into five fields:
-//   39..63 -- must be zero.
+// A 64-bit virtual address is split into six fields:
+//   48..63 -- must be copies of bit 47; xv6 keeps them zero.
+//   39..47 -- 9 bits of level-3 index.
 //   30..38 -- 9 bits of level-2 index.
 //   21..29 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
@@ -101,7 +101,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   if (va >= MAXVA)
     panic("walk");
 
-  for (int level = 2; level > 0; level--) {
+  for (int level = 3; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
     if (*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
@@ -109,7 +109,11 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
       if (!alloc || (pagetable = (pde_t *)kalloc()) == 0)
         return 0;
       memset(pagetable, 0, PGSIZE);
-      *pte = PA2PTE(pagetable) | PTE_V;
+      // unlike riscv, x86 checks the W and U bits at every
+      // level, and allows an access only if all levels do.
+      // so allow everything here, and let the leaf PTE
+      // decide.
+      *pte = PA2PTE(pagetable) | PTE_V | PTE_W | PTE_U;
     }
   }
   return &pagetable[PX(0, va)];
@@ -166,6 +170,10 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if (*pte & PTE_V)
       panic("mappages: remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
+    // the MMU ignores PTE_X; it executes any page
+    // without PTE_NX.
+    if ((perm & PTE_X) == 0)
+      *pte |= PTE_NX;
     if (a == last)
       break;
     a += PGSIZE;
@@ -267,7 +275,9 @@ freewalk(pagetable_t pagetable)
   // there are 2^9 = 512 PTEs in a page table.
   for (int i = 0; i < 512; i++) {
     pte_t pte = pagetable[i];
-    if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+    // walk() sets PTE_W in PTEs that point to lower-level
+    // page tables, so only PTE_R and PTE_X tell a leaf apart.
+    if ((pte & PTE_V) && (pte & (PTE_R | PTE_X)) == 0) {
       // this PTE points to a lower-level page table.
       uint64 child = PTE2PA(pte);
       freewalk((pagetable_t)child);
