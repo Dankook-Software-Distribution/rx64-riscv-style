@@ -11,6 +11,7 @@ OBJS = \
   $K/spinlock.o \
   $K/string.o \
   $K/main.o \
+  $K/vm.o \
   $K/syscall.o \
   $K/sysproc.o \
   $K/bio.o \
@@ -26,7 +27,6 @@ OBJS = \
 
 # not yet ported to x86-64; kernel/stub.c stands in for them.
 # put each one back in OBJS when it is ported.
-#  $K/vm.o
 #  $K/proc.o
 #  $K/swtch.o
 #  $K/trampoline.o
