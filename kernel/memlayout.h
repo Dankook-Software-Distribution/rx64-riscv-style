@@ -1,19 +1,21 @@
 // Physical memory layout
 
-// qemu -machine virt is set up like this,
-// based on qemu's hw/riscv/virt.c:
+// qemu -machine q35 is set up like this,
+// based on qemu's hw/i386/pc_q35.c:
 //
-// 00001000 -- boot ROM, provided by qemu
-// 02000000 -- CLINT
-// 0C000000 -- PLIC
-// 10000000 -- uart0
-// 10001000 -- virtio disk
-// 80000000 -- qemu's boot ROM loads the kernel here,
-//             then jumps here.
-// unused RAM after 80000000.
+// 00000000 -- RAM, but the first 1MB holds the BIOS
+//             and other legacy areas
+// 00100000 -- qemu's -kernel loads the kernel here,
+//             then jumps to _entry (PVH).
+// 08000000 -- end of RAM (-m 128M)
+// FEC00000 -- IOAPIC
+// FEE00000 -- local APIC (LAPIC), one per CPU,
+//             each CPU sees its own at this address
+// the UART is not in this list: it is reached
+// through I/O ports, not memory addresses.
 
 // the kernel uses physical memory thus:
-// 80000000 -- entry.S, then kernel text and data
+// 00100000 -- entry.S, then kernel text and data
 // end -- start of kernel page allocation area
 // PHYSTOP -- end RAM used by the kernel
 
@@ -27,9 +29,11 @@
 #define VIRTIO0     0x10001000
 #define VIRTIO0_IRQ 1
 
-// core-local interrupt controller (CLINT)
-#define CLINT_BASE  0x02000000L
-#define CLINT(hart) (CLINT_BASE + (hart) * 4)
+// local interrupt controller (LAPIC), riscv's CLINT.
+#define LAPIC 0xfee00000L
+
+// I/O interrupt controller (IOAPIC), riscv's PLIC.
+#define IOAPIC 0xfec00000L
 
 // qemu puts platform-level interrupt controller (PLIC) here.
 #define PLIC                 0x0c000000L

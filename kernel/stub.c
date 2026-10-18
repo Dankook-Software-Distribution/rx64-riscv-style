@@ -55,16 +55,9 @@ int either_copyout(int user_dst, uint64 dst, void *src, uint64 len) { NOT_PORTED
 int either_copyin(void *dst, int user_src, uint64 src, uint64 len) { NOT_PORTED("either_copyin"); }
 void procdump(void) { NOT_PORTED("procdump"); }
 
-// vm.c
-
-void kvminit(void) { NOT_PORTED("kvminit"); }
-void kvminithart(void) { NOT_PORTED("kvminithart"); }
-uint64 walkaddr(pagetable_t pagetable, uint64 va) { NOT_PORTED("walkaddr"); }
-uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) { NOT_PORTED("uvmalloc"); }
-void uvmclear(pagetable_t pagetable, uint64 va) { NOT_PORTED("uvmclear"); }
-int copyout(pagetable_t pagetable, uint64 dstva, uint64 src, char *s, uint64 len) { NOT_PORTED("copyout"); }
-int copyin(pagetable_t pagetable, uint64 dst, char *d, uint64 srcva, uint64 len) { NOT_PORTED("copyin"); }
-int copyinstr(pagetable_t pagetable, uint64 dst, char *d, uint64 srcva, uint64 max) { NOT_PORTED("copyinstr"); }
+// kvmmake() calls this while booting, so it cannot panic.
+// it maps no kernel stacks until proc.c is ported.
+void proc_mapstacks(pagetable_t kpgtbl) { }
 
 // trap.c
 

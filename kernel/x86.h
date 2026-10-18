@@ -393,6 +393,23 @@ r_ra()
   return x;
 }
 
+// control register 3 holds the physical address
+// of the page table (riscv's satp).
+// writing it also flushes the TLB.
+static inline void
+w_cr3(uint64 x)
+{
+  asm volatile("movq %0, %%cr3" : : "r"(x) : "memory");
+}
+
+static inline uint64
+r_cr3()
+{
+  uint64 x;
+  asm volatile("movq %%cr3, %0" : "=r"(x));
+  return x;
+}
+
 // flush the TLB.
 static inline void
 sfence_vma()
@@ -426,26 +443,37 @@ typedef uint64 *pagetable_t; // 512 PTEs
 #define PGROUNDUP(sz)  (((sz) + PGSIZE - 1) & ~(PGSIZE - 1))
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE - 1))
 
-#define PTE_V (1L << 0) // valid
-#define PTE_R (1L << 1)
-#define PTE_W (1L << 2)
-#define PTE_X (1L << 3)
-#define PTE_U (1L << 4) // user can access
+// x86-64 PTEs have no read or execute permission bits:
+// every present page is readable, and a page is executable
+// unless its no-execute bit (PTE_NX) is set. the kernel
+// still uses riscv's permissions, keeping PTE_R and PTE_X
+// in bits that the MMU ignores. mappages() sets PTE_NX
+// for mappings without PTE_X.
+#define PTE_V  (1L << 0)   // valid (x86 "present")
+#define PTE_W  (1L << 1)
+#define PTE_U  (1L << 2)   // user can access
+#define PTE_R  (1L << 9)   // ignored by the MMU
+#define PTE_X  (1L << 10)  // ignored by the MMU
+#define PTE_NX (1UL << 63) // no-execute; needs EFER.NXE (entry.S)
+
+// an x86-64 PTE holds a physical address in bits 12..51,
+// at the same position as in the address itself.
+#define PTE_ADDR 0x000FFFFFFFFFF000L
 
 // shift a physical address to the right place for a PTE.
-#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
+#define PA2PTE(pa) (((uint64)pa) & PTE_ADDR)
 
-#define PTE2PA(pte) (((pte) >> 10) << 12)
+#define PTE2PA(pte) ((pte) & PTE_ADDR)
 
-#define PTE_FLAGS(pte) ((pte) & 0x3FF)
+#define PTE_FLAGS(pte) ((pte) & ~PTE_ADDR)
 
-// extract the three 9-bit page table indices from a virtual address.
+// extract the four 9-bit page table indices from a virtual address.
 #define PXMASK         0x1FF // 9 bits
 #define PXSHIFT(level) (PGSHIFT + (9 * (level)))
 #define PX(level, va)  ((((uint64)(va)) >> PXSHIFT(level)) & PXMASK)
 
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by
-// Sv39, to avoid having to sign-extend virtual addresses
-// that have the high bit set.
-#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+// four-level paging, to avoid having to sign-extend virtual
+// addresses that have the high bit set.
+#define MAXVA (1L << (9 + 9 + 9 + 9 + 12 - 1))
