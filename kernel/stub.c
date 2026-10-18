@@ -44,6 +44,7 @@ struct proc *myproc(void) { NOT_PORTED("myproc"); }
 void procinit(void) { }
 void userinit(void) { NOT_PORTED("userinit"); }
 void scheduler(void) { NOT_PORTED("scheduler"); }
+void yield(void) { NOT_PORTED("yield"); }
 void sleep_prepare(void *chan) { NOT_PORTED("sleep_prepare"); }
 void sleep(void) { NOT_PORTED("sleep"); }
 void wakeup(void *chan) { NOT_PORTED("wakeup"); }
@@ -62,14 +63,6 @@ void procdump(void) { NOT_PORTED("procdump"); }
 // kvmmake() calls this while booting, so it cannot panic.
 // it maps no kernel stacks until proc.c is ported.
 void proc_mapstacks(pagetable_t kpgtbl) { }
-
-// trap.c
-
-struct spinlock tickslock;
-uint ticks;
-
-void trapinit(void) { NOT_PORTED("trapinit"); }
-void trapinithart(void) { NOT_PORTED("trapinithart"); }
 
 // virtio_disk.c
 
