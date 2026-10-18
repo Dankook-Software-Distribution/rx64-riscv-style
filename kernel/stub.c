@@ -37,7 +37,11 @@ mycpu(void)
 }
 
 struct proc *myproc(void) { NOT_PORTED("myproc"); }
-void procinit(void) { NOT_PORTED("procinit"); }
+
+// main() calls this while booting, before trapinit(),
+// so it cannot panic. it sets up no processes until
+// proc.c is ported.
+void procinit(void) { }
 void userinit(void) { NOT_PORTED("userinit"); }
 void scheduler(void) { NOT_PORTED("scheduler"); }
 void sleep_prepare(void *chan) { NOT_PORTED("sleep_prepare"); }
