@@ -14,6 +14,50 @@
 #define EFER_LME 0x00000100 // long mode enable
 #define EFER_NXE 0x00000800 // no-execute PTE bit enable
 
+// global descriptor table (GDT) entries.
+// a segment selector is a GDT index times 8, plus the
+// privilege level it requests (0 kernel, 3 user).
+#define GDT_KCODE 1 // kernel code
+#define GDT_KDATA 2 // kernel data and stack
+#define GDT_UDATA 3 // user data and stack
+#define GDT_UCODE 4 // user code
+#define GDT_TSS   5 // task state segment, takes two entries
+#define NGDT      7
+
+#define KCODE_SEL (GDT_KCODE << 3)
+#define KDATA_SEL (GDT_KDATA << 3)
+#define UDATA_SEL ((GDT_UDATA << 3) | 3)
+#define UCODE_SEL ((GDT_UCODE << 3) | 3)
+#define TSS_SEL   (GDT_TSS << 3)
+
+// x86 exception vectors (riscv's scause exception codes).
+// vectors 32..255 are free for device interrupts and
+// system calls.
+#define T_DIVIDE  0  // divide error
+#define T_DEBUG   1  // debug
+#define T_NMI     2  // non-maskable interrupt
+#define T_BRKPT   3  // breakpoint
+#define T_OFLOW   4  // overflow
+#define T_BOUND   5  // bounds check
+#define T_ILLOP   6  // illegal opcode
+#define T_NOFPU   7  // device (FPU) not available
+#define T_DBLFLT  8  // double fault
+#define T_TSS     10 // invalid task switch segment
+#define T_SEGNP   11 // segment not present
+#define T_STACK   12 // stack exception
+#define T_GPFLT   13 // general protection fault
+#define T_PGFLT   14 // page fault
+#define T_FPERR   16 // floating point error
+#define T_ALIGN   17 // alignment check
+#define T_MCHK    18 // machine check
+#define T_SIMDERR 19 // SIMD floating point error
+
+// page fault error code bits.
+#define PFERR_P 0x1  // 1: protection violation, 0: page not present
+#define PFERR_W 0x2  // the access was a write
+#define PFERR_U 0x4  // the access came from user mode
+#define PFERR_I 0x10 // the access was an instruction fetch
+
 #ifndef __ASSEMBLER__
 
 // x86 devices such as the UART are reached through
@@ -408,6 +452,88 @@ r_cr3()
   uint64 x;
   asm volatile("movq %%cr3, %0" : "=r"(x));
   return x;
+}
+
+// control register 2 holds the virtual address
+// that caused the last page fault (riscv's stval).
+static inline uint64
+r_cr2()
+{
+  uint64 x;
+  asm volatile("movq %%cr2, %0" : "=r"(x));
+  return x;
+}
+
+// GDT segment descriptor bits.
+// long mode ignores the base and limit of code and data
+// segments; only these bits matter.
+#define SEG_A        (1UL << 40) // accessed; set so the CPU never writes the GDT
+#define SEG_W        (1UL << 41) // data: writable (code: readable)
+#define SEG_X        (1UL << 43) // code segment
+#define SEG_S        (1UL << 44) // code or data, not a system segment
+#define SEG_DPL(dpl) ((uint64)(dpl) << 45)
+#define SEG_P        (1UL << 47) // present
+#define SEG_L        (1UL << 53) // 64-bit code
+
+#define SEG_TSS64 (9UL << 40) // system segment type: available 64-bit TSS
+
+// task state segment. x86 has no use for its task switching,
+// but the CPU reads trap stack pointers from it: rsp[0] when a
+// trap comes from user mode, ist[n] for IDT gates that name an
+// interrupt stack table entry n (1..7).
+// ist[0] does not exist; that slot is reserved.
+struct tss {
+  uint32 reserved0;
+  uint64 rsp[3];
+  uint64 ist[8];
+  uint64 reserved1;
+  uint16 reserved2;
+  uint16 iomb; // I/O permission bitmap offset
+} __attribute__((packed));
+
+// interrupt descriptor table (IDT) gate: the address of the
+// code for one vector, like riscv's stvec but one per vector.
+struct gatedesc {
+  uint16 off_15_0;
+  uint16 cs;       // code segment selector
+  uint8 ist;       // interrupt stack table entry, 0 for none
+  uint8 type;      // GATE_ bits
+  uint16 off_31_16;
+  uint32 off_63_32;
+  uint32 reserved;
+};
+
+// an interrupt gate turns interrupts off on entry, as a riscv
+// trap does. xv6 uses only interrupt gates.
+#define GATE_INTR       0x0e
+#define GATE_DPL(dpl)   ((dpl) << 5) // lowest privilege allowed to "int" to it
+#define GATE_P          0x80         // present
+
+// load the GDT, IDT or task register.
+// lgdt and lidt take a 10-byte operand: limit, then base.
+struct dtr {
+  uint16 limit;
+  uint64 base;
+} __attribute__((packed));
+
+static inline void
+lgdt(void *p, int size)
+{
+  volatile struct dtr d = {size - 1, (uint64)p};
+  asm volatile("lgdt %0" : : "m"(d));
+}
+
+static inline void
+lidt(void *p, int size)
+{
+  volatile struct dtr d = {size - 1, (uint64)p};
+  asm volatile("lidt %0" : : "m"(d));
+}
+
+static inline void
+ltr(uint16 sel)
+{
+  asm volatile("ltr %0" : : "r"(sel));
 }
 
 // flush the TLB.
