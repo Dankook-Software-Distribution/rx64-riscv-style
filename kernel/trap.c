@@ -11,22 +11,106 @@ uint ticks;
 
 extern char trampoline[], uservec[];
 
-// in kernelvec.S, calls kerneltrap().
-void kernelvec();
+// in kernelvec.S: the address of each vector's entry stub,
+// which calls kerneltrap() through kernelvec.
+extern uint64 kernelvecs[];
 
-extern int devintr();
+int devintr(uint64 vector);
+void setgate(struct gatedesc *g, uint64 entry, int dpl, int ist);
+
+// what kernelvec.S leaves on the stack for kerneltrap():
+// the registers it saves, the vector number and error code,
+// and the frame the CPU pushed. riscv's kerneltrap() reads
+// these from sepc, sstatus and scause instead.
+struct kernelframe {
+  uint64 rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11;
+  uint64 vector;
+  uint64 err;    // error code, or 0
+  uint64 rip;    // riscv's sepc
+  uint64 cs;     // previous privilege level is cs & 3
+  uint64 rflags; // riscv's sstatus, for interrupts
+  uint64 rsp;
+  uint64 ss;
+};
+
+// the kernel's interrupt descriptor table, shared by all
+// CPUs. riscv's stvec holds one trap address; x86 needs
+// one gate per vector.
+struct gatedesc kidt[256];
+
+// riscv needs no segments, but x86 traps do: IDT gates name
+// a code segment, and the CPU finds trap stacks in the task
+// state segment (TSS). each CPU has its own TSS, so each CPU
+// also needs its own GDT, with an entry that points to it.
+uint64 gdt[NCPU][NGDT];
+struct tss tss[NCPU];
+
+// a separate stack for double faults. a double fault often
+// means the kernel stack overflowed into its guard page, so
+// the CPU could not push a trap frame there.
+__attribute__((aligned(16))) char dfstack[NCPU][PGSIZE];
+
+#define IST_DBLFLT 1 // tss.ist[] entry for dfstack
 
 void
 trapinit(void)
 {
   initlock(&tickslock, "time");
+
+  for (int i = 0; i < 256; i++)
+    setgate(&kidt[i], kernelvecs[i], 0, 0);
+  kidt[T_DBLFLT].ist = IST_DBLFLT;
 }
 
 // set up to take exceptions and traps while in the kernel.
 void
 trapinithart(void)
 {
-  w_stvec((uint64)kernelvec);
+  int id = cpuid();
+  uint64 *g = gdt[id];
+  struct tss *t = &tss[id];
+
+  g[0] = 0;
+  g[GDT_KCODE] = SEG_P | SEG_S | SEG_X | SEG_W | SEG_A | SEG_L | SEG_DPL(0);
+  g[GDT_KDATA] = SEG_P | SEG_S | SEG_W | SEG_A | SEG_DPL(0);
+  g[GDT_UDATA] = SEG_P | SEG_S | SEG_W | SEG_A | SEG_DPL(3);
+  g[GDT_UCODE] = SEG_P | SEG_S | SEG_X | SEG_W | SEG_A | SEG_L | SEG_DPL(3);
+
+  t->ist[IST_DBLFLT] = (uint64)dfstack[id] + PGSIZE;
+  // an I/O bitmap offset beyond the TSS means there is no
+  // bitmap, so user code cannot use I/O ports.
+  t->iomb = sizeof(struct tss);
+
+  // a TSS descriptor takes two GDT entries, to hold a
+  // 64-bit base address.
+  uint64 base = (uint64)t;
+  uint64 limit = sizeof(struct tss) - 1;
+  g[GDT_TSS] = (limit & 0xffff) | ((base & 0xffffff) << 16) | SEG_TSS64 |
+               SEG_P | (((limit >> 16) & 0xf) << 48) |
+               (((base >> 24) & 0xff) << 56);
+  g[GDT_TSS + 1] = base >> 32;
+
+  lgdt(g, sizeof(gdt[id]));
+  loadsegs(KCODE_SEL, KDATA_SEL);
+  ltr(TSS_SEL);
+
+  // the x86 counterpart of riscv's w_stvec(kernelvec).
+  lidt(kidt, sizeof(kidt));
+}
+
+// point IDT gate g at entry. dpl is the lowest privilege
+// level allowed to reach it with an int instruction. ist
+// selects a tss.ist[] stack, or 0 for the current stack.
+void
+setgate(struct gatedesc *g, uint64 entry, int dpl, int ist)
+{
+  g->off_15_0 = entry & 0xffff;
+  g->cs = KCODE_SEL;
+  g->ist = ist;
+  g->type = GATE_P | GATE_DPL(dpl) | GATE_INTR;
+  g->off_31_16 = (entry >> 16) & 0xffff;
+  g->off_63_32 = entry >> 32;
+  g->reserved = 0;
 }
 
 //
@@ -37,61 +121,7 @@ trapinithart(void)
 uint64
 usertrap(void)
 {
-  int which_dev = 0;
-
-  if ((r_sstatus() & SSTATUS_SPP) != 0)
-    panic("usertrap: not from user mode");
-
-  // send interrupts and exceptions to kerneltrap(),
-  // since we're now in the kernel.
-  w_stvec((uint64)kernelvec); //DOC: kernelvec
-
-  struct proc *p = myproc();
-
-  // save user program counter.
-  p->trapframe->epc = r_sepc();
-
-  if (r_scause() == 8) {
-    // system call
-
-    if (killed(p))
-      kexit(-1);
-
-    // sepc points to the ecall instruction,
-    // but we want to return to the next instruction.
-    p->trapframe->epc += 4;
-
-    // an interrupt will change sepc, scause, and sstatus,
-    // so enable only now that we're done with those registers.
-    intr_on();
-
-    syscall();
-  } else if ((which_dev = devintr()) != 0) {
-    // ok
-  } else if ((r_scause() == 15 || r_scause() == 13) &&
-             vmfault(p->pagetable, p->sz, r_stval(),
-                     (r_scause() == 13) ? 1 : 0) != 0) {
-    // page fault on lazily-allocated page
-  } else {
-    printk("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printk("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-    setkilled(p);
-  }
-
-  if (killed(p))
-    kexit(-1);
-
-  // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2)
-    yield();
-
-  prepare_return();
-
-  // the user page table to switch to, for trampoline.S
-  uint64 satp = MAKE_SATP(p->pagetable);
-
-  // return to trampoline.S; satp value in a0.
-  return satp;
+  panic("usertrap: not ported yet");
 }
 
 //
@@ -100,56 +130,26 @@ usertrap(void)
 void
 prepare_return(void)
 {
-  struct proc *p = myproc();
-
-  // we're about to switch the destination of traps from
-  // kerneltrap() to usertrap(). because a trap from kernel
-  // code to usertrap would be a disaster, turn off interrupts.
-  intr_off();
-
-  // send syscalls, interrupts, and exceptions to uservec in trampoline.S
-  uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline);
-  w_stvec(trampoline_uservec);
-
-  // set up trapframe values that uservec will need when
-  // the process next traps into the kernel.
-  p->trapframe->kernel_satp = r_satp();         // kernel page table
-  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
-  p->trapframe->kernel_trap = (uint64)usertrap;
-  p->trapframe->kernel_hartid = r_tp(); // hartid for cpuid()
-
-  // set up the registers that trampoline.S's sret will use
-  // to get to user space.
-
-  // set S Previous Privilege mode to User.
-  unsigned long x = r_sstatus();
-  x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
-  x |= SSTATUS_SPIE; // enable interrupts in user mode
-  w_sstatus(x);
-
-  // set S Exception Program Counter to the saved user pc.
-  w_sepc(p->trapframe->epc);
+  panic("prepare_return: not ported yet");
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.
 void
-kerneltrap()
+kerneltrap(struct kernelframe *f)
 {
   int which_dev = 0;
-  uint64 sepc = r_sepc();
-  uint64 sstatus = r_sstatus();
-  uint64 scause = r_scause();
 
-  if ((sstatus & SSTATUS_SPP) == 0)
-    panic("kerneltrap: not from supervisor mode");
+  if ((f->cs & 3) != 0)
+    panic("kerneltrap: not from kernel mode");
   if (intr_get() != 0)
     panic("kerneltrap: interrupts enabled");
 
-  if ((which_dev = devintr()) == 0) {
-    // interrupt or trap from an unknown source
-    printk("scause=0x%lx sepc=0x%lx stval=0x%lx\n", scause, r_sepc(),
-           r_stval());
+  if ((which_dev = devintr(f->vector)) == 0) {
+    // interrupt or trap from an unknown source.
+    // cr2 is riscv's stval, for page faults.
+    printk("vector=0x%lx err=0x%lx rip=0x%lx cr2=0x%lx\n", f->vector, f->err,
+           f->rip, r_cr2());
     panic("kerneltrap");
   }
 
@@ -157,26 +157,16 @@ kerneltrap()
   if (which_dev == 2 && myproc() != 0)
     yield();
 
-  // the yield() may have caused some traps to occur,
-  // so restore trap registers for use by kernelvec.S's sepc instruction.
-  w_sepc(sepc);
-  w_sstatus(sstatus);
+  // riscv restores sepc and sstatus here, since the yield()
+  // may have caused traps that changed them. x86 keeps them
+  // in this trap's frame on the stack, which no other trap
+  // writes, so iretq in kernelvec.S gets the right values.
 }
 
 void
 clockintr()
 {
-  if (cpuid() == 0) {
-    acquire(&tickslock);
-    ticks++;
-    wakeup(&ticks);
-    release(&tickslock);
-  }
-
-  // ask for the next timer interrupt. this also clears
-  // the interrupt request. 1000000 is about a tenth
-  // of a second.
-  w_stimecmp(r_time() + 1000000);
+  panic("clockintr: not ported yet");
 }
 
 // check if it's an external interrupt or software interrupt,
@@ -185,36 +175,9 @@ clockintr()
 // 1 if other device,
 // 0 if not recognized.
 int
-devintr()
+devintr(uint64 vector)
 {
-  uint64 scause = r_scause();
-
-  if (scause == 0x8000000000000009L) {
-    // this is a supervisor external interrupt, via PLIC.
-
-    // irq indicates which device interrupted.
-    int irq = plic_claim();
-
-    if (irq == UART0_IRQ) {
-      uartintr();
-    } else if (irq == VIRTIO0_IRQ) {
-      virtio_disk_intr();
-    } else if (irq) {
-      printk("unexpected interrupt irq=%d\n", irq);
-    }
-
-    // the PLIC allows each device to raise at most one
-    // interrupt at a time; tell the PLIC the device is
-    // now allowed to interrupt again.
-    if (irq)
-      plic_complete(irq);
-
-    return 1;
-  } else if (scause == 0x8000000000000005L) {
-    // timer interrupt.
-    clockintr();
-    return 2;
-  } else {
-    return 0;
-  }
+  // no device interrupts until the interrupt controllers are
+  // set up, so every vector is not recognized for now.
+  return 0;
 }

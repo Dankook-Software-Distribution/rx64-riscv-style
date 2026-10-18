@@ -12,6 +12,7 @@ OBJS = \
   $K/string.o \
   $K/main.o \
   $K/vm.o \
+  $K/trap.o \
   $K/syscall.o \
   $K/sysproc.o \
   $K/bio.o \
@@ -22,6 +23,7 @@ OBJS = \
   $K/pipe.o \
   $K/exec.o \
   $K/sysfile.o \
+  $K/kernelvec.o \
   $K/plic.o \
   $K/stub.o
 
@@ -30,8 +32,6 @@ OBJS = \
 #  $K/proc.o
 #  $K/swtch.o
 #  $K/trampoline.o
-#  $K/trap.o
-#  $K/kernelvec.o
 #  $K/virtio_disk.o
 
 # x86_64-elf- or x86_64-linux-gnu-
