@@ -536,6 +536,26 @@ ltr(uint16 sel)
   asm volatile("ltr %0" : : "r"(sel));
 }
 
+// lgdt does not reload the segment registers, which still
+// hold descriptors from the old GDT. load cs with a far
+// return, and ds, es and ss directly. fs and gs are left
+// alone, so that their base addresses are kept.
+static inline void
+loadsegs(uint16 cs, uint16 ds)
+{
+  asm volatile("pushq %q0\n\t"
+               "leaq 1f(%%rip), %%rax\n\t"
+               "pushq %%rax\n\t"
+               "lretq\n"
+               "1:\n\t"
+               "movw %w1, %%ds\n\t"
+               "movw %w1, %%es\n\t"
+               "movw %w1, %%ss"
+               :
+               : "r"((uint64)cs), "r"((uint64)ds)
+               : "rax", "memory");
+}
+
 // flush the TLB.
 static inline void
 sfence_vma()
