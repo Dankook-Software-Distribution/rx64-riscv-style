@@ -166,7 +166,19 @@ kerneltrap(struct kernelframe *f)
 void
 clockintr()
 {
-  panic("clockintr: not ported yet");
+  if (cpuid() == 0) {
+    acquire(&tickslock);
+    ticks++;
+    wakeup(&ticks);
+    release(&tickslock);
+  }
+
+  // ask for the next timer interrupt, a tenth of a second
+  // from now (see lapicinit()). riscv's stimecmp write also
+  // clears the interrupt request; the LAPIC instead needs
+  // to be told that this interrupt is done.
+  lapicsettimer(100000000);
+  lapiceoi();
 }
 
 // check if it's an external interrupt or software interrupt,
@@ -177,7 +189,37 @@ clockintr()
 int
 devintr(uint64 vector)
 {
-  // no device interrupts until the interrupt controllers are
-  // set up, so every vector is not recognized for now.
-  return 0;
+  if (vector > T_TIMER && vector < T_SPURIOUS) {
+    // this is a device interrupt, via the IOAPIC.
+
+    // the vector tells which device interrupted
+    // (see ioapicinit()); riscv asks the PLIC.
+    int irq = vector - T_IRQ0;
+
+    if (irq == UART0_IRQ) {
+      uartintr();
+    } else if (irq == VIRTIO0_IRQ) {
+      virtio_disk_intr();
+    } else {
+      printk("unexpected interrupt irq=%d\n", irq);
+    }
+
+    // the LAPIC delivers no other interrupt of this
+    // priority or lower until it is told that this
+    // one is done.
+    lapiceoi();
+
+    return 1;
+  } else if (vector == T_TIMER) {
+    // timer interrupt.
+    clockintr();
+    return 2;
+  } else if (vector == T_SPURIOUS) {
+    // the LAPIC raises this when an interrupt went away
+    // before the CPU took it. no interrupt is in
+    // service, so there is nothing to tell the LAPIC.
+    return 1;
+  } else {
+    return 0;
+  }
 }
