@@ -36,18 +36,39 @@ mycpu(void)
   return &cpus[0];
 }
 
-struct proc *myproc(void) { NOT_PORTED("myproc"); }
+// until proc.c is ported there are no processes, so
+// main() boots all the way to the scheduler, which can
+// only wait for interrupts. these behave as proc.c's do
+// with no processes.
 
-// main() calls this while booting, before trapinit(),
-// so it cannot panic. it sets up no processes until
-// proc.c is ported.
+// main() calls these while booting, so they cannot panic.
 void procinit(void) { }
-void userinit(void) { NOT_PORTED("userinit"); }
-void scheduler(void) { NOT_PORTED("scheduler"); }
+void userinit(void) { }
+
+// there is never a current process.
+struct proc *myproc(void) { return 0; }
+
+// interrupt handlers call this (clockintr(), uartintr(),
+// consoleintr()); with no processes, no one is waiting.
+void wakeup(void *chan) { }
+
+// the part of riscv's scheduler() that runs when no
+// process is RUNNABLE: wait for an interrupt. hlt, unlike
+// riscv's wfi, does not wake up while interrupts are off,
+// so turn them on just for it. sti takes effect only after
+// the next instruction, so an interrupt cannot be handled
+// between sti and hlt and leave the CPU halted until the
+// interrupt after it.
+void
+scheduler(void)
+{
+  for (;;)
+    asm volatile("sti; hlt; cli");
+}
+
 void yield(void) { NOT_PORTED("yield"); }
 void sleep_prepare(void *chan) { NOT_PORTED("sleep_prepare"); }
 void sleep(void) { NOT_PORTED("sleep"); }
-void wakeup(void *chan) { NOT_PORTED("wakeup"); }
 int kfork(void) { NOT_PORTED("kfork"); }
 void kexit(int status) { NOT_PORTED("kexit"); }
 int kwait(uint64 addr) { NOT_PORTED("kwait"); }
@@ -66,8 +87,11 @@ void proc_mapstacks(pagetable_t kpgtbl) { }
 
 // virtio_disk.c
 
-void virtio_disk_init(void) { NOT_PORTED("virtio_disk_init"); }
+// main() calls this while booting, so it cannot panic.
+// nothing reads the disk while there are no processes.
+void virtio_disk_init(void) { }
 void virtio_disk_rw(struct buf *b, int write) { NOT_PORTED("virtio_disk_rw"); }
+void virtio_disk_intr(void) { NOT_PORTED("virtio_disk_intr"); }
 
 // trampoline.S
 
