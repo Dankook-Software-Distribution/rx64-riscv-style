@@ -22,8 +22,8 @@ main()
     procinit();         // process table
     trapinit();         // trap vectors
     trapinithart();     // install kernel trap vector
-    plicinit();         // set up interrupt controller
-    plicinithart();     // ask PLIC for device interrupts
+    ioapicinit();       // set up interrupt controller
+    lapicinit();        // ask LAPIC for device and timer interrupts
     binit();            // buffer cache
     iinit();            // inode table
     fileinit();         // file table
@@ -38,7 +38,7 @@ main()
     printk("hart %d starting\n", cpuid());
     kvminithart();  // turn on paging
     trapinithart(); // install kernel trap vector
-    plicinithart(); // ask PLIC for device interrupts
+    lapicinit();    // ask LAPIC for device and timer interrupts
   }
 
   scheduler();
