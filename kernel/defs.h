@@ -176,11 +176,8 @@ void            lapicinit(void);
 void            lapiceoi(void);
 void            lapicsettimer(uint32);
 
-// plic.c
-void            plicinit(void);
-void            plicinithart(void);
-int             plic_claim(void);
-void            plic_complete(int);
+// ioapic.c
+void            ioapicinit(void);
 
 // virtio_disk.c
 void            virtio_disk_init(void);
