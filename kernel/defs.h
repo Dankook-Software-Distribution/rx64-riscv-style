@@ -171,6 +171,11 @@ int             copyinstr(pagetable_t, uint64, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
 uint64          vmfault(pagetable_t, uint64, uint64, int);
 
+// lapic.c
+void            lapicinit(void);
+void            lapiceoi(void);
+void            lapicsettimer(uint32);
+
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
