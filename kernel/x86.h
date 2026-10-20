@@ -52,6 +52,15 @@
 #define T_MCHK    18 // machine check
 #define T_SIMDERR 19 // SIMD floating point error
 
+// device interrupt vectors (riscv's scause interrupt codes).
+// the IOAPIC raises vector T_IRQ0 + n for its input (GSI) n,
+// so devintr() can find the IRQ number without asking the
+// interrupt controller, as riscv's plic_claim() does.
+#define T_IRQ0     32
+#define T_TIMER    (T_IRQ0 + 0) // LAPIC timer. GSI 0 is the
+                                // 8259's, which is masked.
+#define T_SPURIOUS 0xff         // LAPIC spurious interrupt
+
 // page fault error code bits.
 #define PFERR_P 0x1  // 1: protection violation, 0: page not present
 #define PFERR_W 0x2  // the access was a write
