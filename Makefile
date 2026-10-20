@@ -24,7 +24,8 @@ OBJS = \
   $K/exec.o \
   $K/sysfile.o \
   $K/kernelvec.o \
-  $K/plic.o \
+  $K/lapic.o \
+  $K/ioapic.o \
   $K/stub.o
 
 # not yet ported to x86-64; kernel/stub.c stands in for them.

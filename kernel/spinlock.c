@@ -25,10 +25,11 @@ acquire(struct spinlock *lk)
   if (holding(lk))
     panic("acquire");
 
-  // On RISC-V, __atomic_exchange_n turns into an atomic swap:
-  //   a5 = 1
-  //   s1 = &lk->locked
-  //   amoswap.w.aq a5, a5, (s1)
+  // On x86, __atomic_exchange_n turns into xchg, which is
+  // always atomic when one operand is in memory:
+  //   eax = 1
+  //   rbx = &lk->locked
+  //   xchg %eax, (%rbx)
   //
   // Passing __ATOMIC_ACQUIRE to __atomic_exchange_n tells
   // the C compiler and the processor to not move loads or stores
@@ -56,10 +57,9 @@ release(struct spinlock *lk)
   // implies that an assignment might be implemented with
   // multiple store instructions.
   //
-  // On RISC-V, __atomic_store_n turns into a single atomic store:
-  //   s1 = &lk->locked
-  //   fence rw,w
-  //   sw zero,0(s1)
+  // On x86, __atomic_store_n turns into a single atomic store:
+  //   rbx = &lk->locked
+  //   movl $0, (%rbx)
   //
   // The __ATOMIC_RELEASE argument to __atomic_store_n tells the
   // the C compiler and the CPU to not move loads or stores past
@@ -68,8 +68,10 @@ release(struct spinlock *lk)
   // and that loads in the critical section occur strictly before
   // the lock is released.
   //
-  // On RISC-V, this generates a fence instruction before the store:
-  //   fence rw,w
+  // On RISC-V, this generates a fence instruction before the store.
+  // x86 needs none: it never lets a store become visible before
+  // earlier loads and stores, so the argument only keeps the
+  // compiler from moving them.
   __atomic_store_n(&lk->locked, 0, __ATOMIC_RELEASE);
 
   pop_off();
