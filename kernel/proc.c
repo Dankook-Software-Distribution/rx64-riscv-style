@@ -437,7 +437,7 @@ scheduler(void)
     // turned off; enable them to avoid a deadlock if all
     // processes are waiting. Then turn them back off
     // to avoid a possible race between an interrupt
-    // and wfi.
+    // and hlt.
     intr_on();
     intr_off();
 
@@ -464,7 +464,11 @@ scheduler(void)
     }
     if (found == 0) {
       // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
+      // unlike riscv's wfi, hlt does not wake up while interrupts
+      // are off, so turn them on just for it. sti takes effect only
+      // after the next instruction, so an interrupt that is already
+      // waiting wakes hlt instead of being handled before it.
+      asm volatile("sti; hlt; cli");
     }
   }
 }
