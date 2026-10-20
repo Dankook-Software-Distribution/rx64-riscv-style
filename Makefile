@@ -24,6 +24,7 @@ OBJS = \
   $K/exec.o \
   $K/sysfile.o \
   $K/kernelvec.o \
+  $K/lapic.o \
   $K/plic.o \
   $K/stub.o
 
