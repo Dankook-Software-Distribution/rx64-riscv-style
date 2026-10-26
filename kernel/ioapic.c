@@ -78,4 +78,9 @@ ioapicinit(void)
   // them to CPU 0 (LAPIC ID 0). the uart's interrupt is
   // edge-triggered and active-high.
   ioapicroute(UART0_IRQ, 0, 0);
+
+  // the virtio disk's PCI INTA pin is level-triggered and
+  // (as the ACPI tables say) active-high: it stays raised
+  // until virtio_disk_intr() reads the device's ISR status.
+  ioapicroute(VIRTIO0_IRQ, INT_LEVEL, 0);
 }
