@@ -49,8 +49,24 @@ void userinit(void) { }
 struct proc *myproc(void) { return 0; }
 
 // interrupt handlers call this (clockintr(), uartintr(),
-// consoleintr()); with no processes, no one is waiting.
+// consoleintr(), virtio_disk_intr()); with no processes,
+// no one is waiting.
 void wakeup(void *chan) { }
+
+// with no processes, there is no other process to run
+// while the kernel (in main()) waits for something, such as
+// the disk, so sleep() just waits for an interrupt, as
+// scheduler() does. every caller checks its condition again
+// when sleep() returns, so it does not matter which
+// interrupt it was. the caller has interrupts off, so one
+// that arrives between its check and hlt waits until sti.
+void sleep_prepare(void *chan) { }
+
+void
+sleep(void)
+{
+  asm volatile("sti; hlt; cli");
+}
 
 // the part of riscv's scheduler() that runs when no
 // process is RUNNABLE: wait for an interrupt. hlt, unlike
@@ -67,8 +83,6 @@ scheduler(void)
 }
 
 void yield(void) { NOT_PORTED("yield"); }
-void sleep_prepare(void *chan) { NOT_PORTED("sleep_prepare"); }
-void sleep(void) { NOT_PORTED("sleep"); }
 int kfork(void) { NOT_PORTED("kfork"); }
 void kexit(int status) { NOT_PORTED("kexit"); }
 int kwait(uint64 addr) { NOT_PORTED("kwait"); }
@@ -84,14 +98,6 @@ void procdump(void) { NOT_PORTED("procdump"); }
 // kvmmake() calls this while booting, so it cannot panic.
 // it maps no kernel stacks until proc.c is ported.
 void proc_mapstacks(pagetable_t kpgtbl) { }
-
-// virtio_disk.c
-
-// main() calls this while booting, so it cannot panic.
-// nothing reads the disk while there are no processes.
-void virtio_disk_init(void) { }
-void virtio_disk_rw(struct buf *b, int write) { NOT_PORTED("virtio_disk_rw"); }
-void virtio_disk_intr(void) { NOT_PORTED("virtio_disk_intr"); }
 
 // trampoline.S
 

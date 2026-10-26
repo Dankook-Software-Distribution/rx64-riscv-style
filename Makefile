@@ -27,6 +27,7 @@ OBJS = \
   $K/lapic.o \
   $K/ioapic.o \
   $K/pci.o \
+  $K/virtio_disk.o \
   $K/stub.o
 
 # not yet ported to x86-64; kernel/stub.c stands in for them.
@@ -34,7 +35,6 @@ OBJS = \
 #  $K/proc.o
 #  $K/swtch.o
 #  $K/trampoline.o
-#  $K/virtio_disk.o
 
 # x86_64-elf- or x86_64-linux-gnu-
 # perhaps in /opt/cross/bin
