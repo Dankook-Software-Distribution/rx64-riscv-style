@@ -1,35 +1,47 @@
 //
 // virtio device definitions.
-// for both the mmio interface, and virtio descriptors.
+// for both the pci interface, and virtio descriptors.
 // only tested with qemu.
 //
 // the virtio spec:
 // https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.pdf
 //
 
-// virtio mmio control registers, mapped starting at 0x10001000.
-// from qemu virtio_mmio.h
+// a virtio pci device's registers are in its memory BARs,
+// in regions that its vendor-specific PCI capabilities
+// point to. offsets of a capability's fields:
+#define VIRTIO_PCI_CAP_ID         0x09 // vendor-specific capability ID
+#define VIRTIO_PCI_CAP_CFG_TYPE   3    // 8 bits: which region (below)
+#define VIRTIO_PCI_CAP_BAR        4    // 8 bits: BAR it is in
+#define VIRTIO_PCI_CAP_OFFSET     8    // 32 bits: offset in that BAR
+#define VIRTIO_PCI_CAP_NOTIFY_MUL 16   // 32 bits: notify region only
+
+// cfg_type: the regions.
+#define VIRTIO_PCI_CAP_COMMON_CFG 1 // common configuration
+#define VIRTIO_PCI_CAP_NOTIFY_CFG 2 // queue notifications
+#define VIRTIO_PCI_CAP_ISR_CFG    3 // interrupt status
+#define VIRTIO_PCI_CAP_DEVICE_CFG 4 // device-specific configuration
+
+// common configuration registers, as offsets in the common
+// configuration region, from qemu virtio_pci.h. each must be
+// accessed with its own width; a 64-bit address is written
+// as two 32-bit halves, low then high.
 // clang-format off
-#define VIRTIO_MMIO_MAGIC_VALUE		0x000 // 0x74726976
-#define VIRTIO_MMIO_VERSION		0x004 // version; should be 2
-#define VIRTIO_MMIO_DEVICE_ID		0x008 // device type; 1 is net, 2 is disk
-#define VIRTIO_MMIO_VENDOR_ID		0x00c // 0x554d4551
-#define VIRTIO_MMIO_DEVICE_FEATURES	0x010
-#define VIRTIO_MMIO_DRIVER_FEATURES	0x020
-#define VIRTIO_MMIO_QUEUE_SEL		0x030 // select queue, write-only
-#define VIRTIO_MMIO_QUEUE_NUM_MAX	0x034 // max size of current queue, read-only
-#define VIRTIO_MMIO_QUEUE_NUM		0x038 // size of current queue, write-only
-#define VIRTIO_MMIO_QUEUE_READY		0x044 // ready bit
-#define VIRTIO_MMIO_QUEUE_NOTIFY	0x050 // write-only
-#define VIRTIO_MMIO_INTERRUPT_STATUS	0x060 // read-only
-#define VIRTIO_MMIO_INTERRUPT_ACK	0x064 // write-only
-#define VIRTIO_MMIO_STATUS		0x070 // read/write
-#define VIRTIO_MMIO_QUEUE_DESC_LOW	0x080 // physical address for descriptor table, write-only
-#define VIRTIO_MMIO_QUEUE_DESC_HIGH	0x084
-#define VIRTIO_MMIO_DRIVER_DESC_LOW	0x090 // physical address for available ring, write-only
-#define VIRTIO_MMIO_DRIVER_DESC_HIGH	0x094
-#define VIRTIO_MMIO_DEVICE_DESC_LOW	0x0a0 // physical address for used ring, write-only
-#define VIRTIO_MMIO_DEVICE_DESC_HIGH	0x0a4
+#define VIRTIO_PCI_DEVICE_FEATURE_SEL	0x00 // 32: select which 32 feature bits
+#define VIRTIO_PCI_DEVICE_FEATURE	0x04 // 32: device's features, read-only
+#define VIRTIO_PCI_DRIVER_FEATURE_SEL	0x08 // 32
+#define VIRTIO_PCI_DRIVER_FEATURE	0x0c // 32
+#define VIRTIO_PCI_STATUS		0x14 // 8: read/write
+#define VIRTIO_PCI_QUEUE_SEL		0x16 // 16: select queue
+#define VIRTIO_PCI_QUEUE_SIZE		0x18 // 16: max size when read, then set size
+#define VIRTIO_PCI_QUEUE_ENABLE		0x1c // 16: ready bit
+#define VIRTIO_PCI_QUEUE_NOTIFY_OFF	0x1e // 16: where to notify, read-only
+#define VIRTIO_PCI_QUEUE_DESC_LOW	0x20 // 32: physical address for descriptor table
+#define VIRTIO_PCI_QUEUE_DESC_HIGH	0x24
+#define VIRTIO_PCI_DRIVER_DESC_LOW	0x28 // 32: physical address for available ring
+#define VIRTIO_PCI_DRIVER_DESC_HIGH	0x2c
+#define VIRTIO_PCI_DEVICE_DESC_LOW	0x30 // 32: physical address for used ring
+#define VIRTIO_PCI_DEVICE_DESC_HIGH	0x34
 // clang-format on
 
 // status register bits, from qemu virtio_config.h
@@ -47,6 +59,7 @@
 #define VIRTIO_F_ANY_LAYOUT         27
 #define VIRTIO_RING_F_INDIRECT_DESC 28
 #define VIRTIO_RING_F_EVENT_IDX     29
+#define VIRTIO_F_VERSION_1          32 /* not a legacy device */
 
 // this many virtio descriptors.
 // must be a power of two.

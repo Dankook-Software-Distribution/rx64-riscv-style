@@ -28,6 +28,19 @@ kvmmake(void)
 
   // the uart needs no mapping: it is reached through I/O ports.
 
+  // virtio disk: its registers are in its memory BARs, at
+  // addresses chosen by the firmware. if there is no disk,
+  // map nothing; virtio_disk_init() will panic.
+  int dev = pci_find(VIRTIO0_VENDOR, VIRTIO0_DEVICE);
+  if (dev >= 0) {
+    for (int n = 0; n < 6; n++) {
+      uint64 size;
+      uint64 bar = pci_bar(dev, n, &size);
+      if (bar != 0)
+        kvmmap(kpgtbl, bar, bar, PGROUNDUP(size), PTE_R | PTE_W);
+    }
+  }
+
   // IOAPIC
   kvmmap(kpgtbl, IOAPIC, IOAPIC, PGSIZE, PTE_R | PTE_W);
 

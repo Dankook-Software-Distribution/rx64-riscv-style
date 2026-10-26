@@ -1,8 +1,8 @@
 //
 // driver for qemu's virtio disk device.
-// uses qemu's mmio interface to virtio.
+// uses qemu's pci interface to virtio (modern, not legacy).
 //
-// qemu ... -drive file=fs.img,if=none,format=raw,id=x0 -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
+// qemu ... -drive file=fs.img,if=none,format=raw,id=x0 -device virtio-blk-pci,drive=x0,disable-legacy=on,addr=0x3
 //
 
 #include "types.h"
@@ -16,10 +16,20 @@
 #include "buf.h"
 #include "virtio.h"
 
-// the address of virtio mmio register r.
-#define R(r) ((volatile uint32 *)(VIRTIO0 + (r)))
+// the address of common configuration register r,
+// for each of the registers' widths.
+#define R(r)   ((volatile uint32 *)(disk.common + (r)))
+#define R16(r) ((volatile uint16 *)(disk.common + (r)))
+#define R8(r)  ((volatile uint8 *)(disk.common + (r)))
 
 static struct disk {
+  // addresses of the device's registers, which
+  // virtio_disk_init() finds through PCI.
+  uint64 common; // common configuration region
+  uint64 notify; // where to notify queue 0
+  uint64 isr;    // interrupt status register
+
+
   // a set (not a ring) of DMA descriptors, with which the
   // driver tells the device where to read and write individual
   // disk operations. there are NUM descriptors.
@@ -58,6 +68,42 @@ static struct disk {
 
 } disk;
 
+// find the device's registers: each vendor-specific
+// capability names a region, as an offset in one of the
+// device's BARs (which kvmmake() has mapped).
+static void
+virtio_disk_find(int dev)
+{
+  uint32 notify_mul = 0;
+
+  for (int c = pci_nextcap(dev, 0, VIRTIO_PCI_CAP_ID); c != 0;
+       c = pci_nextcap(dev, c, VIRTIO_PCI_CAP_ID)) {
+    int type = pci_read8(dev, c + VIRTIO_PCI_CAP_CFG_TYPE);
+    uint64 size;
+    uint64 bar = pci_bar(dev, pci_read8(dev, c + VIRTIO_PCI_CAP_BAR), &size);
+    if (bar == 0)
+      continue;
+    uint64 addr = bar + pci_read32(dev, c + VIRTIO_PCI_CAP_OFFSET);
+
+    // the spec says to use the first capability of each type.
+    if (type == VIRTIO_PCI_CAP_COMMON_CFG && disk.common == 0) {
+      disk.common = addr;
+    } else if (type == VIRTIO_PCI_CAP_NOTIFY_CFG && disk.notify == 0) {
+      disk.notify = addr;
+      notify_mul = pci_read32(dev, c + VIRTIO_PCI_CAP_NOTIFY_MUL);
+    } else if (type == VIRTIO_PCI_CAP_ISR_CFG && disk.isr == 0) {
+      disk.isr = addr;
+    }
+  }
+  if (disk.common == 0 || disk.notify == 0 || disk.isr == 0)
+    panic("virtio disk registers");
+
+  // each queue has its own place to notify, at an offset
+  // from the notify region.
+  *R16(VIRTIO_PCI_QUEUE_SEL) = 0;
+  disk.notify += *R16(VIRTIO_PCI_QUEUE_NOTIFY_OFF) * notify_mul;
+}
+
 void
 virtio_disk_init(void)
 {
@@ -65,25 +111,29 @@ virtio_disk_init(void)
 
   initlock(&disk.vdisk_lock, "virtio_disk");
 
-  if (*R(VIRTIO_MMIO_MAGIC_VALUE) != 0x74726976 ||
-      *R(VIRTIO_MMIO_VERSION) != 2 || *R(VIRTIO_MMIO_DEVICE_ID) != 2 ||
-      *R(VIRTIO_MMIO_VENDOR_ID) != 0x554d4551) {
+  int dev = pci_find(VIRTIO0_VENDOR, VIRTIO0_DEVICE);
+  if (dev < 0)
     panic("could not find virtio disk");
-  }
+  pci_enable(dev);
+  virtio_disk_find(dev);
 
   // reset device
-  *R(VIRTIO_MMIO_STATUS) = status;
+  *R8(VIRTIO_PCI_STATUS) = status;
 
   // set ACKNOWLEDGE status bit
   status |= VIRTIO_CONFIG_S_ACKNOWLEDGE;
-  *R(VIRTIO_MMIO_STATUS) = status;
+  *R8(VIRTIO_PCI_STATUS) = status;
 
   // set DRIVER status bit
   status |= VIRTIO_CONFIG_S_DRIVER;
-  *R(VIRTIO_MMIO_STATUS) = status;
+  *R8(VIRTIO_PCI_STATUS) = status;
 
-  // negotiate features
-  uint64 features = *R(VIRTIO_MMIO_DEVICE_FEATURES);
+  // negotiate features. there are 64 feature bits, read
+  // and written 32 at a time.
+  *R(VIRTIO_PCI_DEVICE_FEATURE_SEL) = 0;
+  uint64 features = *R(VIRTIO_PCI_DEVICE_FEATURE);
+  *R(VIRTIO_PCI_DEVICE_FEATURE_SEL) = 1;
+  features |= (uint64)*R(VIRTIO_PCI_DEVICE_FEATURE) << 32;
   features &= ~(1 << VIRTIO_BLK_F_RO);
   features &= ~(1 << VIRTIO_BLK_F_SCSI);
   features &= ~(1 << VIRTIO_BLK_F_FLUSH);
@@ -92,26 +142,36 @@ virtio_disk_init(void)
   features &= ~(1 << VIRTIO_F_ANY_LAYOUT);
   features &= ~(1 << VIRTIO_RING_F_EVENT_IDX);
   features &= ~(1 << VIRTIO_RING_F_INDIRECT_DESC);
-  *R(VIRTIO_MMIO_DRIVER_FEATURES) = features;
+  // a device that is not legacy (disable-legacy=on) offers
+  // VERSION_1, and the driver must accept it (riscv's mmio
+  // device works without it). accept no other feature above
+  // bit 31, such as other ring layouts.
+  if (!(features & (1UL << VIRTIO_F_VERSION_1)))
+    panic("virtio disk not VERSION_1");
+  features &= 0xffffffffUL | (1UL << VIRTIO_F_VERSION_1);
+  *R(VIRTIO_PCI_DRIVER_FEATURE_SEL) = 0;
+  *R(VIRTIO_PCI_DRIVER_FEATURE) = features;
+  *R(VIRTIO_PCI_DRIVER_FEATURE_SEL) = 1;
+  *R(VIRTIO_PCI_DRIVER_FEATURE) = features >> 32;
 
   // tell device that feature negotiation is complete.
   status |= VIRTIO_CONFIG_S_FEATURES_OK;
-  *R(VIRTIO_MMIO_STATUS) = status;
+  *R8(VIRTIO_PCI_STATUS) = status;
 
   // re-read status to ensure FEATURES_OK is set.
-  status = *R(VIRTIO_MMIO_STATUS);
+  status = *R8(VIRTIO_PCI_STATUS);
   if (!(status & VIRTIO_CONFIG_S_FEATURES_OK))
     panic("virtio disk FEATURES_OK unset");
 
   // initialize queue 0.
-  *R(VIRTIO_MMIO_QUEUE_SEL) = 0;
+  *R16(VIRTIO_PCI_QUEUE_SEL) = 0;
 
   // ensure queue 0 is not in use.
-  if (*R(VIRTIO_MMIO_QUEUE_READY))
+  if (*R16(VIRTIO_PCI_QUEUE_ENABLE))
     panic("virtio disk should not be ready");
 
   // check maximum queue size.
-  uint32 max = *R(VIRTIO_MMIO_QUEUE_NUM_MAX);
+  uint32 max = *R16(VIRTIO_PCI_QUEUE_SIZE);
   if (max == 0)
     panic("virtio disk has no queue 0");
   if (max < NUM)
@@ -128,18 +188,18 @@ virtio_disk_init(void)
   memset(disk.used, 0, PGSIZE);
 
   // set queue size.
-  *R(VIRTIO_MMIO_QUEUE_NUM) = NUM;
+  *R16(VIRTIO_PCI_QUEUE_SIZE) = NUM;
 
   // write physical addresses.
-  *R(VIRTIO_MMIO_QUEUE_DESC_LOW) = (uint64)disk.desc;
-  *R(VIRTIO_MMIO_QUEUE_DESC_HIGH) = (uint64)disk.desc >> 32;
-  *R(VIRTIO_MMIO_DRIVER_DESC_LOW) = (uint64)disk.avail;
-  *R(VIRTIO_MMIO_DRIVER_DESC_HIGH) = (uint64)disk.avail >> 32;
-  *R(VIRTIO_MMIO_DEVICE_DESC_LOW) = (uint64)disk.used;
-  *R(VIRTIO_MMIO_DEVICE_DESC_HIGH) = (uint64)disk.used >> 32;
+  *R(VIRTIO_PCI_QUEUE_DESC_LOW) = (uint64)disk.desc;
+  *R(VIRTIO_PCI_QUEUE_DESC_HIGH) = (uint64)disk.desc >> 32;
+  *R(VIRTIO_PCI_DRIVER_DESC_LOW) = (uint64)disk.avail;
+  *R(VIRTIO_PCI_DRIVER_DESC_HIGH) = (uint64)disk.avail >> 32;
+  *R(VIRTIO_PCI_DEVICE_DESC_LOW) = (uint64)disk.used;
+  *R(VIRTIO_PCI_DEVICE_DESC_HIGH) = (uint64)disk.used >> 32;
 
   // queue is ready.
-  *R(VIRTIO_MMIO_QUEUE_READY) = 0x1;
+  *R16(VIRTIO_PCI_QUEUE_ENABLE) = 0x1;
 
   // all NUM descriptors start out unused.
   for (int i = 0; i < NUM; i++)
@@ -147,9 +207,9 @@ virtio_disk_init(void)
 
   // tell device we're completely ready.
   status |= VIRTIO_CONFIG_S_DRIVER_OK;
-  *R(VIRTIO_MMIO_STATUS) = status;
+  *R8(VIRTIO_PCI_STATUS) = status;
 
-  // plic.c and trap.c arrange for interrupts from VIRTIO0_IRQ.
+  // ioapic.c and trap.c arrange for interrupts from VIRTIO0_IRQ.
 }
 
 // find a free descriptor, mark it non-free, return its index.
@@ -281,7 +341,7 @@ virtio_disk_rw(struct buf *b, int write)
 
   io_fence();
 
-  *R(VIRTIO_MMIO_QUEUE_NOTIFY) = 0; // value is queue number
+  *(volatile uint16 *)disk.notify = 0; // value is queue number
 
   // Wait for virtio_disk_intr() to say request has finished.
   while (b->disk == 1) {
@@ -303,12 +363,14 @@ virtio_disk_intr()
   acquire(&disk.vdisk_lock);
 
   // the device won't raise another interrupt until we tell it
-  // we've seen this interrupt, which the following line does.
+  // we've seen this interrupt, which the following line does:
+  // reading the ISR status register clears it, and lowers
+  // the device's (level-triggered) interrupt pin.
   // this may race with the device writing new entries to
   // the "used" ring, in which case we may process the new
   // completion entries in this interrupt, and have nothing to do
   // in the next interrupt, which is harmless.
-  *R(VIRTIO_MMIO_INTERRUPT_ACK) = *R(VIRTIO_MMIO_INTERRUPT_STATUS) & 0x3;
+  (void)*(volatile uint8 *)disk.isr;
 
   io_fence();
 
