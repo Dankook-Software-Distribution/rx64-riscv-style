@@ -159,8 +159,11 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_sync\
 
-fs.img: mkfs/mkfs README $(UPROGS)
-	mkfs/mkfs fs.img README $(UPROGS)
+# the user programs do not build for x86-64 yet, so the
+# file system holds only README. put $(UPROGS) back in
+# both lines when they build.
+fs.img: mkfs/mkfs README
+	mkfs/mkfs fs.img README
 
 -include kernel/*.d user/*.d
 
@@ -184,14 +187,16 @@ endif
 
 QEMUOPTS = -machine q35 -kernel $K/kernel -m 128M -smp $(CPUS) -nographic
 QEMUOPTS += -nic none
+QEMUOPTS += -drive file=fs.img,if=none,format=raw,id=x0
+QEMUOPTS += -device virtio-blk-pci,drive=x0,disable-legacy=on,addr=0x3
 
-qemu: check-qemu-version $K/kernel
+qemu: check-qemu-version $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
 
 .gdbinit: .gdbinit.tmpl-x86_64
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
 
-qemu-gdb: $K/kernel .gdbinit
+qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
