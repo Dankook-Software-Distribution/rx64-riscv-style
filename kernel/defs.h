@@ -179,6 +179,17 @@ void            lapicsettimer(uint32);
 // ioapic.c
 void            ioapicinit(void);
 
+// pci.c
+uint32          pci_read32(int, int);
+uint16          pci_read16(int, int);
+uchar           pci_read8(int, int);
+void            pci_write32(int, int, uint32);
+void            pci_write16(int, int, uint16);
+int             pci_find(uint16, uint16);
+void            pci_enable(int);
+uint64          pci_bar(int, int, uint64*);
+int             pci_nextcap(int, int, int);
+
 // virtio_disk.c
 void            virtio_disk_init(void);
 void            virtio_disk_rw(struct buf *, int);
