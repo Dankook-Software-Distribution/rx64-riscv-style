@@ -8,6 +8,9 @@
 // 00100000 -- qemu's -kernel loads the kernel here,
 //             then jumps to _entry (PVH).
 // 08000000 -- end of RAM (-m 128M)
+// ...      -- PCI devices' registers, at addresses
+//             chosen by the firmware (FE000000 for
+//             the virtio disk)
 // FEC00000 -- IOAPIC
 // FEE00000 -- local APIC (LAPIC), one per CPU,
 //             each CPU sees its own at this address
@@ -25,9 +28,15 @@
 #define UART0     0x3f8
 #define UART0_IRQ 4
 
-// virtio mmio interface
-#define VIRTIO0     0x10001000
-#define VIRTIO0_IRQ 1
+// virtio disk: a virtio-blk-pci device (modern only),
+// found by its PCI vendor and device IDs. the firmware
+// chooses the addresses of its registers (see pci.c).
+// qemu puts it in PCI slot 3 (-device ...,addr=0x3), and
+// the ACPI tables (DSDT _PRT) connect slot 3's INTA pin
+// to IOAPIC input (GSI) 20 + (3 + 0) % 4 = 23.
+#define VIRTIO0_VENDOR 0x1af4
+#define VIRTIO0_DEVICE 0x1042
+#define VIRTIO0_IRQ    23
 
 // local interrupt controller (LAPIC), riscv's CLINT.
 #define LAPIC 0xfee00000L
