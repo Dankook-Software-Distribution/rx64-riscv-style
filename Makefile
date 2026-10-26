@@ -26,6 +26,7 @@ OBJS = \
   $K/kernelvec.o \
   $K/lapic.o \
   $K/ioapic.o \
+  $K/pci.o \
   $K/stub.o
 
 # not yet ported to x86-64; kernel/stub.c stands in for them.
