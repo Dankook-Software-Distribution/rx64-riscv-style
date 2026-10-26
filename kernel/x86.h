@@ -86,6 +86,34 @@ outb(ushort port, uchar x)
   asm volatile("outb %0, %1" : : "a"(x), "d"(port));
 }
 
+static inline ushort
+inw(ushort port)
+{
+  ushort x;
+  asm volatile("inw %1, %0" : "=a"(x) : "d"(port));
+  return x;
+}
+
+static inline void
+outw(ushort port, ushort x)
+{
+  asm volatile("outw %0, %1" : : "a"(x), "d"(port));
+}
+
+static inline uint32
+inl(ushort port)
+{
+  uint32 x;
+  asm volatile("inl %1, %0" : "=a"(x) : "d"(port));
+  return x;
+}
+
+static inline void
+outl(ushort port, uint32 x)
+{
+  asm volatile("outl %0, %1" : : "a"(x), "d"(port));
+}
+
 // which hart (core) is this?
 static inline uint64
 r_mhartid()
@@ -573,11 +601,20 @@ sfence_vma()
   asm volatile("sfence.vma zero, zero" ::: "memory");
 }
 
-// fence for memory-mapped IO
+// fence for memory-mapped IO.
+// riscv needs a fence instruction here, but x86 keeps the
+// order that matters to a device: stores to RAM become
+// visible (to the CPUs and to a device reading RAM) in
+// program order, a store to a device register is not done
+// before earlier stores, and loads are not reordered with
+// other loads. so only the compiler must be kept from
+// reordering memory accesses across this point.
+// (device registers must be uncached for this; the
+// firmware's MTRRs make the PCI and APIC addresses so.)
 static inline void
 io_fence()
 {
-  asm volatile("fence iorw, iorw" ::: "memory");
+  asm volatile("" ::: "memory");
 }
 
 // fence for icache
