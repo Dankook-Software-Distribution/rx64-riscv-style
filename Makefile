@@ -12,6 +12,7 @@ OBJS = \
   $K/string.o \
   $K/main.o \
   $K/vm.o \
+  $K/proc.o \
   $K/swtch.o \
   $K/trap.o \
   $K/syscall.o \
@@ -33,7 +34,6 @@ OBJS = \
 
 # not yet ported to x86-64; kernel/stub.c stands in for them.
 # put each one back in OBJS when it is ported.
-#  $K/proc.o
 #  $K/trampoline.o
 
 # x86_64-elf- or x86_64-linux-gnu-
