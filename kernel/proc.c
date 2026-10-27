@@ -243,7 +243,7 @@ growproc(int n)
 
   sz = p->sz;
   if (n > 0) {
-    if (sz + n > TRAPFRAME) {
+    if (sz + n > CPUENTRY) {
       return -1;
     }
     if ((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
@@ -544,9 +544,11 @@ forkret(void)
 
   // return to user space, mimicing usertrap()'s return.
   prepare_return();
-  uint64 satp = MAKE_SATP(p->pagetable);
+  // cr3 takes the page table's physical address as it is;
+  // riscv's satp also needs a mode field (MAKE_SATP).
+  uint64 cr3 = (uint64)p->pagetable;
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64))trampoline_userret)(satp);
+  ((void (*)(uint64))trampoline_userret)(cr3);
 }
 
 // Register current process as waiting for wakeups on chan.
