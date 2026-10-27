@@ -160,11 +160,8 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_sync\
 
-# the user programs do not build for x86-64 yet, so the
-# file system holds only README. put $(UPROGS) back in
-# both lines when they build.
-fs.img: mkfs/mkfs README
-	mkfs/mkfs fs.img README
+fs.img: mkfs/mkfs README $(UPROGS)
+	mkfs/mkfs fs.img README $(UPROGS)
 
 -include kernel/*.d user/*.d
 
