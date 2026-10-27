@@ -14,6 +14,9 @@
 #define EFER_LME 0x00000100 // long mode enable
 #define EFER_NXE 0x00000800 // no-execute PTE bit enable
 
+#define MSR_GS_BASE        0xc0000101 // base address of the gs segment
+#define MSR_KERNEL_GS_BASE 0xc0000102 // swapgs exchanges it with MSR_GS_BASE
+
 // global descriptor table (GDT) entries.
 // a segment selector is a GDT index times 8, plus the
 // privilege level it requests (0 kernel, 3 user).
@@ -112,6 +115,44 @@ static inline void
 outl(ushort port, uint32 x)
 {
   asm volatile("outl %0, %1" : : "a"(x), "d"(port));
+}
+
+// which CPU is this? (riscv's mhartid)
+// cpuid leaf 1 reports this CPU's initial local APIC ID in
+// ebx bits 31..24. qemu numbers them 0, 1, 2, ..., so the
+// APIC ID can index cpus[].
+static inline int
+r_apicid()
+{
+  uint32 a = 1, b, c = 0, d;
+  asm volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+  return b >> 24;
+}
+
+// model-specific registers.
+static inline uint64
+rdmsr(uint32 msr)
+{
+  uint32 lo, hi;
+  asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+  return ((uint64)hi << 32) | lo;
+}
+
+static inline void
+wrmsr(uint32 msr, uint64 x)
+{
+  asm volatile("wrmsr" : : "c"(msr), "a"((uint32)x), "d"((uint32)(x >> 32)));
+}
+
+// read the 8 bytes at the gs segment's base address.
+// the kernel keeps a pointer to this CPU's struct cpu there
+// (see start.c), for mycpu().
+static inline uint64
+r_gsptr()
+{
+  uint64 x;
+  asm volatile("movq %%gs:0, %0" : "=r"(x));
+  return x;
 }
 
 // which hart (core) is this?
