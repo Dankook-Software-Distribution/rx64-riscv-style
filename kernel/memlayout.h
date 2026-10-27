@@ -57,9 +57,10 @@
 // in both user and kernel space.
 #define TRAMPOLINE (MAXVA - PGSIZE)
 
-// map kernel stacks beneath the trampoline,
+// map kernel stacks beneath the trampoline and the
+// cpu entry pages (CPUENTRY, below),
 // each surrounded by invalid guard pages.
-#define KSTACK(p) (TRAMPOLINE - ((p) + 1) * 2 * PGSIZE)
+#define KSTACK(p) (CPUENTRY - ((p) + 1) * 2 * PGSIZE)
 
 // User memory layout.
 // Address zero first:
@@ -68,6 +69,18 @@
 //   fixed-size stack
 //   expandable heap
 //   ...
+//   CPUENTRY (two pages, the same as in the kernel)
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+// riscv finds the trap handler through stvec, a register.
+// x86 finds it through tables in memory: the GDT, the TSS
+// (for the kernel stack) and the IDT, at virtual addresses
+// that the CPU looks up in whatever page table is in use
+// when a trap arrives. so, like the trampoline, these
+// tables are mapped at the same address in user and
+// kernel space, in two pages beneath TRAPFRAME: one for
+// every CPU's GDT and TSS, one for the user IDT.
+// user memory must end below CPUENTRY.
+#define CPUENTRY (TRAPFRAME - 2 * PGSIZE)
