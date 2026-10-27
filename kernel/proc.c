@@ -295,7 +295,7 @@ kfork(void)
   *(np->trapframe) = *(p->trapframe);
 
   // Cause fork to return 0 in the child.
-  np->trapframe->a0 = 0;
+  np->trapframe->rax = 0;
 
   // increment reference counts on open file descriptors.
   for (i = 0; i < NOFILE; i++)
@@ -548,9 +548,9 @@ forkret(void)
     fsinit(ROOTDEV);
 
     // We can invoke kexec() now that file system is initialized.
-    // Put the return value (argc) of kexec into a0.
-    p->trapframe->a0 = kexec("/init", (char *[]){"/init", 0});
-    if (p->trapframe->a0 == -1) {
+    // Put the return value (argc) of kexec into rax.
+    p->trapframe->rax = kexec("/init", (char *[]){"/init", 0});
+    if (p->trapframe->rax == -1) {
       panic("exec");
     }
   }

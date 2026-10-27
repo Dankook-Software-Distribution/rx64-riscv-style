@@ -100,7 +100,7 @@ kexec(char *path, char **argv)
   // addresses in ustack[].
   for (argc = 0; argv[argc]; argc++) {
     sp -= strlen(argv[argc]) + 1;
-    sp -= sp % 16; // riscv sp must be 16-byte aligned
+    sp -= sp % 16; // sp must be 16-byte aligned
     if (sp < stackbase)
       goto bad;
     if (copyout(pagetable, sz, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
@@ -118,10 +118,12 @@ kexec(char *path, char **argv)
       0)
     goto bad;
 
-  // a0 and a1 contain arguments to user main(argc, argv)
-  // argc is returned via the system call return
-  // value, which goes in a0.
-  p->trapframe->a1 = sp;
+  // rdi and rsi contain arguments to user main(argc, argv).
+  // riscv passes argc as the system call's return value,
+  // since a0 is both the return value and the first
+  // argument; x86 returns values in rax, so set rdi too.
+  p->trapframe->rdi = argc;
+  p->trapframe->rsi = sp;
 
   // Save program name for debugging.
   for (last = s = path; *s; s++)
@@ -133,11 +135,16 @@ kexec(char *path, char **argv)
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;
-  p->trapframe->epc = elf.entry; // initial program counter = ulib.c:start()
-  p->trapframe->sp = sp;         // initial stack pointer
+  p->trapframe->rip = elf.entry; // initial program counter = ulib.c:start()
+  // initial stack pointer. an x86 function expects rsp to
+  // be 8 bytes past a 16-byte boundary on entry, since call
+  // pushes a return address. nothing calls start(), so
+  // leave room for one.
+  p->trapframe->rsp = sp - 8;
+  p->trapframe->rflags = FL_IF; // user starts with interrupts on
   proc_freepagetable(oldpagetable, oldsz);
 
-  return argc; // this ends up in a0, the first argument to main(argc, argv)
+  return argc; // this ends up in rax, exec's return value
 
 bad:
   if (pagetable)
