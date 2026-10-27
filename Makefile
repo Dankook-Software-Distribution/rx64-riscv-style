@@ -14,6 +14,7 @@ OBJS = \
   $K/vm.o \
   $K/proc.o \
   $K/swtch.o \
+  $K/trampoline.o \
   $K/trap.o \
   $K/syscall.o \
   $K/sysproc.o \
@@ -29,12 +30,7 @@ OBJS = \
   $K/lapic.o \
   $K/ioapic.o \
   $K/pci.o \
-  $K/virtio_disk.o \
-  $K/stub.o
-
-# not yet ported to x86-64; kernel/stub.c stands in for them.
-# put each one back in OBJS when it is ported.
-#  $K/trampoline.o
+  $K/virtio_disk.o
 
 # x86_64-elf- or x86_64-linux-gnu-
 # perhaps in /opt/cross/bin
@@ -160,11 +156,8 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_sync\
 
-# the user programs do not build for x86-64 yet, so the
-# file system holds only README. put $(UPROGS) back in
-# both lines when they build.
-fs.img: mkfs/mkfs README
-	mkfs/mkfs fs.img README
+fs.img: mkfs/mkfs README $(UPROGS)
+	mkfs/mkfs fs.img README $(UPROGS)
 
 -include kernel/*.d user/*.d
 

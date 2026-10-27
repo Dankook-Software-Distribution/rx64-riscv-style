@@ -174,7 +174,7 @@ freeproc(struct proc *p)
 }
 
 // Create a user page table for a given process, with no user memory,
-// but with trampoline and trapframe pages.
+// but with trampoline, trapframe and cpu entry pages.
 pagetable_t
 proc_pagetable(struct proc *p)
 {
@@ -204,6 +204,18 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  // map the descriptor tables that the CPU reads when a trap
+  // arrives from user space, beneath the trapframe page.
+  // shared by all processes, and, like the trampoline,
+  // only for the kernel, so not PTE_U.
+  if (mappages(pagetable, CPUENTRY, 2 * PGSIZE, (uint64)&cpuentry,
+               PTE_R | PTE_W) < 0) {
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -214,6 +226,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, CPUENTRY, 2, 0);
   uvmfree(pagetable, sz);
 }
 
@@ -243,7 +256,7 @@ growproc(int n)
 
   sz = p->sz;
   if (n > 0) {
-    if (sz + n > TRAPFRAME) {
+    if (sz + n > CPUENTRY) {
       return -1;
     }
     if ((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
@@ -282,7 +295,7 @@ kfork(void)
   *(np->trapframe) = *(p->trapframe);
 
   // Cause fork to return 0 in the child.
-  np->trapframe->a0 = 0;
+  np->trapframe->rax = 0;
 
   // increment reference counts on open file descriptors.
   for (i = 0; i < NOFILE; i++)
@@ -535,18 +548,20 @@ forkret(void)
     fsinit(ROOTDEV);
 
     // We can invoke kexec() now that file system is initialized.
-    // Put the return value (argc) of kexec into a0.
-    p->trapframe->a0 = kexec("/init", (char *[]){"/init", 0});
-    if (p->trapframe->a0 == -1) {
+    // Put the return value (argc) of kexec into rax.
+    p->trapframe->rax = kexec("/init", (char *[]){"/init", 0});
+    if (p->trapframe->rax == -1) {
       panic("exec");
     }
   }
 
   // return to user space, mimicing usertrap()'s return.
   prepare_return();
-  uint64 satp = MAKE_SATP(p->pagetable);
+  // cr3 takes the page table's physical address as it is;
+  // riscv's satp also needs a mode field (MAKE_SATP).
+  uint64 cr3 = (uint64)p->pagetable;
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64))trampoline_userret)(satp);
+  ((void (*)(uint64))trampoline_userret)(cr3);
 }
 
 // Register current process as waiting for wakeups on chan.

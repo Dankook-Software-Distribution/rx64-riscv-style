@@ -31,23 +31,27 @@ fetchstr(uint64 addr, char *buf, int max)
   return strlen(buf);
 }
 
+// the user's system call stubs (usys.pl) are ordinary C
+// functions, so the arguments arrive in the C calling
+// convention's registers. "int" leaves rcx alone, so it
+// can still hold the fourth argument.
 static uint64
 argraw(int n)
 {
   struct proc *p = myproc();
   switch (n) {
   case 0:
-    return p->trapframe->a0;
+    return p->trapframe->rdi;
   case 1:
-    return p->trapframe->a1;
+    return p->trapframe->rsi;
   case 2:
-    return p->trapframe->a2;
+    return p->trapframe->rdx;
   case 3:
-    return p->trapframe->a3;
+    return p->trapframe->rcx;
   case 4:
-    return p->trapframe->a4;
+    return p->trapframe->r8;
   case 5:
-    return p->trapframe->a5;
+    return p->trapframe->r9;
   }
   panic("argraw");
   return -1;
@@ -139,13 +143,13 @@ syscall(void)
   int num;
   struct proc *p = myproc();
 
-  num = p->trapframe->a7;
+  num = p->trapframe->rax;
   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
-    // and store its return value in p->trapframe->a0
-    p->trapframe->a0 = syscalls[num]();
+    // and store its return value in p->trapframe->rax
+    p->trapframe->rax = syscalls[num]();
   } else {
     printk("%d %s: unknown sys call %d\n", p->pid, p->name, num);
-    p->trapframe->a0 = -1;
+    p->trapframe->rax = -1;
   }
 }

@@ -23,52 +23,68 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 
+// the x86 descriptor tables that traps from user space need,
+// in the two pages mapped at CPUENTRY in both user and kernel
+// space (see memlayout.h): each CPU's GDT and TSS in the
+// first page, the IDT for user mode in the second.
+struct cpuentry {
+  uint64 gdt[NCPU][NGDT];
+  struct tss tss[NCPU];
+  struct gatedesc uidt[256] __attribute__((aligned(PGSIZE)));
+};
+
+extern struct cpuentry cpuentry;
+
+// the address at CPUENTRY of x, which is in cpuentry.
+#define CPUENTRY_VA(x) (CPUENTRY + ((uint64)(x) - (uint64)&cpuentry))
+
 // per-process data for the trap handling code in trampoline.S.
 // sits in a page by itself just under the trampoline page in the
 // user page table. not specially mapped in the kernel page table.
-// uservec in trampoline.S saves user registers in the trapframe,
-// then initializes registers from the trapframe's
-// kernel_sp, kernel_hartid, kernel_satp, and jumps to kernel_trap.
+// a trap from user space switches to the stack that ends at the
+// end of the trapframe (the TSS's rsp[0], see trapinithart()):
+// the CPU pushes ss through rip, the vector's entry stub pushes
+// the vector and error code, then uservec in trampoline.S pushes
+// the user registers, initializes registers from the trapframe's
+// kernel_sp and kernel_cr3, and jumps to kernel_trap.
 // prepare_return() and userret in trampoline.S set up
 // the trapframe's kernel_*, restore user registers from the
 // trapframe, switch to the user page table, and enter user space.
+// riscv's kernel_hartid is not needed: swapgs in trampoline.S
+// switches gs between the user's and this CPU's struct cpu.
 struct trapframe {
-  /*   0 */ uint64 kernel_satp;   // kernel page table
-  /*   8 */ uint64 kernel_sp;     // top of process's kernel stack
-  /*  16 */ uint64 kernel_trap;   // usertrap()
-  /*  24 */ uint64 epc;           // saved user program counter
-  /*  32 */ uint64 kernel_hartid; // saved kernel tp
-  /*  40 */ uint64 ra;
-  /*  48 */ uint64 sp;
-  /*  56 */ uint64 gp;
-  /*  64 */ uint64 tp;
-  /*  72 */ uint64 t0;
-  /*  80 */ uint64 t1;
-  /*  88 */ uint64 t2;
-  /*  96 */ uint64 s0;
-  /* 104 */ uint64 s1;
-  /* 112 */ uint64 a0;
-  /* 120 */ uint64 a1;
-  /* 128 */ uint64 a2;
-  /* 136 */ uint64 a3;
-  /* 144 */ uint64 a4;
-  /* 152 */ uint64 a5;
-  /* 160 */ uint64 a6;
-  /* 168 */ uint64 a7;
-  /* 176 */ uint64 s2;
-  /* 184 */ uint64 s3;
-  /* 192 */ uint64 s4;
-  /* 200 */ uint64 s5;
-  /* 208 */ uint64 s6;
-  /* 216 */ uint64 s7;
-  /* 224 */ uint64 s8;
-  /* 232 */ uint64 s9;
-  /* 240 */ uint64 s10;
-  /* 248 */ uint64 s11;
-  /* 256 */ uint64 t3;
-  /* 264 */ uint64 t4;
-  /* 272 */ uint64 t5;
-  /* 280 */ uint64 t6;
+  /*   0 */ uint64 kernel_cr3;  // kernel page table
+  /*   8 */ uint64 kernel_sp;   // top of process's kernel stack
+  /*  16 */ uint64 kernel_trap; // usertrap()
+  /*  24 */ uint64 pad;         // keeps the end 16-byte aligned
+
+  // pushed by uservec
+  /*  32 */ uint64 r15;
+  /*  40 */ uint64 r14;
+  /*  48 */ uint64 r13;
+  /*  56 */ uint64 r12;
+  /*  64 */ uint64 r11;
+  /*  72 */ uint64 r10;
+  /*  80 */ uint64 r9;
+  /*  88 */ uint64 r8;
+  /*  96 */ uint64 rbp;
+  /* 104 */ uint64 rdi;
+  /* 112 */ uint64 rsi;
+  /* 120 */ uint64 rdx;
+  /* 128 */ uint64 rcx;
+  /* 136 */ uint64 rbx;
+  /* 144 */ uint64 rax;
+
+  // pushed by the vector's entry stub
+  /* 152 */ uint64 vector; // riscv's scause
+  /* 160 */ uint64 err;    // error code, or 0
+
+  // pushed by the CPU
+  /* 168 */ uint64 rip; // saved user program counter (riscv's epc)
+  /* 176 */ uint64 cs;
+  /* 184 */ uint64 rflags;
+  /* 192 */ uint64 rsp;
+  /* 200 */ uint64 ss;
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };

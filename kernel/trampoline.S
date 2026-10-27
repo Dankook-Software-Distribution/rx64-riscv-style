@@ -6,7 +6,7 @@
         # at the same virtual address (TRAMPOLINE)
         # in user and kernel space so that it continues
         # to work when it switches page tables.
-        # kernel.ld causes this code to start at 
+        # kernel.ld causes this code to start at
         # a page boundary.
         #
 
@@ -17,137 +17,161 @@
 .globl trampoline
 .globl usertrap
 trampoline:
-.align 4
+
+        #
+        # prepare_return() loads the user IDT, whose gates
+        # point at these entry stubs (at their addresses in
+        # the TRAMPOLINE page), so traps from user space
+        # start here, in kernel mode, but with a user page
+        # table.
+        #
+        # riscv jumps to the one address in stvec for every
+        # trap; x86 needs code for each of its 256 vectors,
+        # as in kernelvec.S. each stub pushes a 0 if the CPU
+        # pushed no error code, then its vector number, and
+        # jumps to uservec.
+        #
+.macro uvecstub n
+uvec\n:
+        .if (\n == T_DBLFLT) || (\n >= T_TSS && \n <= T_PGFLT) || (\n == T_ALIGN) || (\n == 21) || (\n == 29) || (\n == 30)
+        .else
+        pushq $0
+        .endif
+        pushq $\n
+        jmp uservec
+.endm
+
+.altmacro
+
+.set i, 0
+.rept 256
+        uvecstub %i
+.set i, i + 1
+.endr
+
 .globl uservec
-uservec:    
-	#
-        # trap.c sets stvec to point here, so
-        # traps from user space start here,
-        # in supervisor mode, but with a
-        # user page table.
+uservec:
+        #
+        # the CPU switched to the stack in the TSS (rsp[0]),
+        # which ends at the end of this process's trapframe
+        # (see trapinithart()), and pushed the user's ss,
+        # rsp, rflags, cs and rip there. with the vector and
+        # the error code from the stub, the trapframe now
+        # holds everything from vector on.
         #
 
-        # save user a0 in sscratch so
-        # a0 can be used to get at TRAPFRAME.
-        csrw sscratch, a0
+        # make gs point to this CPU's struct cpu, for mycpu();
+        # swapgs swaps the user's gs base with the one that
+        # userret saved in MSR_KERNEL_GS_BASE.
+        # (riscv loads tp from p->trapframe->kernel_hartid.)
+        swapgs
+
+        # save the user registers in the trapframe,
+        # below the vector.
+        pushq %rax
+        pushq %rbx
+        pushq %rcx
+        pushq %rdx
+        pushq %rsi
+        pushq %rdi
+        pushq %rbp
+        pushq %r8
+        pushq %r9
+        pushq %r10
+        pushq %r11
+        pushq %r12
+        pushq %r13
+        pushq %r14
+        pushq %r15
 
         # each process has a separate p->trapframe memory area,
         # but it's mapped to the same virtual address
         # (TRAPFRAME) in every process's user page table.
-        li a0, TRAPFRAME
-        
-        # save the user registers in TRAPFRAME
-        sd ra, 40(a0)
-        sd sp, 48(a0)
-        sd gp, 56(a0)
-        sd tp, 64(a0)
-        sd t0, 72(a0)
-        sd t1, 80(a0)
-        sd t2, 88(a0)
-        sd s0, 96(a0)
-        sd s1, 104(a0)
-        sd a1, 120(a0)
-        sd a2, 128(a0)
-        sd a3, 136(a0)
-        sd a4, 144(a0)
-        sd a5, 152(a0)
-        sd a6, 160(a0)
-        sd a7, 168(a0)
-        sd s2, 176(a0)
-        sd s3, 184(a0)
-        sd s4, 192(a0)
-        sd s5, 200(a0)
-        sd s6, 208(a0)
-        sd s7, 216(a0)
-        sd s8, 224(a0)
-        sd s9, 232(a0)
-        sd s10, 240(a0)
-        sd s11, 248(a0)
-        sd t3, 256(a0)
-        sd t4, 264(a0)
-        sd t5, 272(a0)
-        sd t6, 280(a0)
-
-	# save the user a0 in p->trapframe->a0
-        csrr t0, sscratch
-        sd t0, 112(a0)
+        movabsq $TRAPFRAME, %rax
 
         # initialize kernel stack pointer, from p->trapframe->kernel_sp
-        ld sp, 8(a0)
-
-        # make tp hold the current hartid, from p->trapframe->kernel_hartid
-        ld tp, 32(a0)
+        movq 8(%rax), %rsp
 
         # load the address of usertrap(), from p->trapframe->kernel_trap
-        ld t0, 16(a0)
+        movq 16(%rax), %rbx
 
-        # fetch the kernel page table address, from p->trapframe->kernel_satp.
-        ld t1, 0(a0)
-
-        # wait for any previous memory operations to complete, so that
-        # they use the user page table.
-        sfence.vma zero, zero
+        # fetch the kernel page table address, from p->trapframe->kernel_cr3.
+        movq 0(%rax), %rcx
 
         # install the kernel page table.
-        csrw satp, t1
+        # writing cr3 also flushes the user's TLB entries.
+        movq %rcx, %cr3
 
-        # flush now-stale user entries from the TLB.
-        sfence.vma zero, zero
+        # the user may have set the direction flag, but C
+        # code expects it clear. (the trap turned interrupts
+        # off, as a riscv trap does, but left this flag.)
+        cld
 
-        # call usertrap()
-        jalr t0
+        # call usertrap(); it returns to userret, below.
+        call *%rbx
+
+        # usertrap() returns here, with the user page table
+        # in rax. userret takes it in rdi, the first
+        # argument, since forkret() calls userret as a
+        # C function.
+        movq %rax, %rdi
 
 .globl userret
 userret:
-        # usertrap() returns here, with user satp in a0.
         # return from kernel to user.
 
-        # flush icache, in case this is the first time
-        # we're running this proc on this hart.
-        fence.i
-
         # switch to the user page table.
-        sfence.vma zero, zero
-        csrw satp, a0
-        sfence.vma zero, zero
+        movq %rdi, %cr3
 
-        li a0, TRAPFRAME
+        # restore the user registers from TRAPFRAME.
+        movabsq $(TRAPFRAME + 32), %rsp
+        popq %r15
+        popq %r14
+        popq %r13
+        popq %r12
+        popq %r11
+        popq %r10
+        popq %r9
+        popq %r8
+        popq %rbp
+        popq %rdi
+        popq %rsi
+        popq %rdx
+        popq %rcx
+        popq %rbx
+        popq %rax
 
-        # restore all but a0 from TRAPFRAME
-        ld ra, 40(a0)
-        ld sp, 48(a0)
-        ld gp, 56(a0)
-        ld tp, 64(a0)
-        ld t0, 72(a0)
-        ld t1, 80(a0)
-        ld t2, 88(a0)
-        ld s0, 96(a0)
-        ld s1, 104(a0)
-        ld a1, 120(a0)
-        ld a2, 128(a0)
-        ld a3, 136(a0)
-        ld a4, 144(a0)
-        ld a5, 152(a0)
-        ld a6, 160(a0)
-        ld a7, 168(a0)
-        ld s2, 176(a0)
-        ld s3, 184(a0)
-        ld s4, 192(a0)
-        ld s5, 200(a0)
-        ld s6, 208(a0)
-        ld s7, 216(a0)
-        ld s8, 224(a0)
-        ld s9, 232(a0)
-        ld s10, 240(a0)
-        ld s11, 248(a0)
-        ld t3, 256(a0)
-        ld t4, 264(a0)
-        ld t5, 272(a0)
-        ld t6, 280(a0)
+        # skip the vector and error code.
+        addq $16, %rsp
 
-	# restore user a0
-        ld a0, 112(a0)
-        
+        # give the user its gs base back, and save this
+        # CPU's for the next uservec.
+        swapgs
+
         # return to user mode and user pc.
-        # prepare_return() sets up sstatus and sepc.
-        sret
+        # prepare_return() set up the trapframe's
+        # rip, cs, rflags, rsp and ss for iretq.
+        iretq
+
+.noaltmacro
+
+        # uservecs[i] is the kernel address of vector i's
+        # stub, for trapinit() to turn into its address in
+        # the TRAMPOLINE page and put in the user IDT.
+.macro uvecaddr n
+        .quad uvec\n
+.endm
+
+.altmacro
+
+.section .rodata
+.p2align 3
+.globl uservecs
+uservecs:
+.set i, 0
+.rept 256
+        uvecaddr %i
+.set i, i + 1
+.endr
+
+.noaltmacro
