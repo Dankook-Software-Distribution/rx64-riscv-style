@@ -174,7 +174,7 @@ freeproc(struct proc *p)
 }
 
 // Create a user page table for a given process, with no user memory,
-// but with trampoline and trapframe pages.
+// but with trampoline, trapframe and cpu entry pages.
 pagetable_t
 proc_pagetable(struct proc *p)
 {
@@ -204,6 +204,18 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  // map the descriptor tables that the CPU reads when a trap
+  // arrives from user space, beneath the trapframe page.
+  // shared by all processes, and, like the trampoline,
+  // only for the kernel, so not PTE_U.
+  if (mappages(pagetable, CPUENTRY, 2 * PGSIZE, (uint64)&cpuentry,
+               PTE_R | PTE_W) < 0) {
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -214,6 +226,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, CPUENTRY, 2, 0);
   uvmfree(pagetable, sz);
 }
 
