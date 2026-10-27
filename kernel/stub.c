@@ -22,18 +22,17 @@
 
 struct cpu cpus[NCPU];
 
-// only CPU 0 runs until the other CPUs are started,
-// so these two work without per-CPU registers.
+// start() puts this CPU's struct cpu in its GS base.
 int
 cpuid()
 {
-  return 0;
+  return mycpu() - cpus;
 }
 
 struct cpu *
 mycpu(void)
 {
-  return &cpus[0];
+  return (struct cpu *)r_gsptr();
 }
 
 // until proc.c is ported there are no processes, so
