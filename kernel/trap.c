@@ -9,11 +9,15 @@
 struct spinlock tickslock;
 uint ticks;
 
-extern char trampoline[], uservec[];
+extern char trampoline[];
 
 // in kernelvec.S: the address of each vector's entry stub,
 // which calls kerneltrap() through kernelvec.
 extern uint64 kernelvecs[];
+
+// in trampoline.S: the kernel address of each vector's entry
+// stub, which calls usertrap() through uservec.
+extern uint64 uservecs[];
 
 int devintr(uint64 vector);
 void setgate(struct gatedesc *g, uint64 entry, int dpl, int ist);
@@ -62,6 +66,17 @@ trapinit(void)
   for (int i = 0; i < 256; i++)
     setgate(&kidt[i], kernelvecs[i], 0, 0);
   kidt[T_DBLFLT].ist = IST_DBLFLT;
+
+  // the IDT for user mode, which prepare_return() loads.
+  // its gates point at the stubs in the trampoline page,
+  // at their addresses in user space. a double fault from
+  // user mode needs no ist stack: the CPU switches to the
+  // trapframe anyway (and dfstack is not in the user page
+  // table). only the system call vector may be raised by
+  // user code, with "int".
+  for (int i = 0; i < 256; i++)
+    setgate(&cpuentry.uidt[i], TRAMPOLINE + (uservecs[i] - (uint64)trampoline),
+            i == T_SYSCALL ? 3 : 0, 0);
 }
 
 // set up to take exceptions and traps while in the kernel.
@@ -79,6 +94,13 @@ trapinithart(void)
   g[GDT_UCODE] = SEG_P | SEG_S | SEG_X | SEG_W | SEG_A | SEG_L | SEG_DPL(3);
 
   t->ist[IST_DBLFLT] = (uint64)dfstack[id] + PGSIZE;
+  // a trap from user mode switches to rsp[0], the end of the
+  // trapframe, so that the CPU saves the user's rip, rsp and
+  // so on there, for uservec in trampoline.S. it is the same
+  // address in every process (TRAPFRAME), so it is set here
+  // once. it must be 16-byte aligned, as the CPU would align
+  // it otherwise.
+  t->rsp[0] = TRAPFRAME + sizeof(struct trapframe);
   // an I/O bitmap offset beyond the TSS means there is no
   // bitmap, so user code cannot use I/O ports.
   t->iomb = sizeof(struct tss);
@@ -122,12 +144,76 @@ setgate(struct gatedesc *g, uint64 entry, int dpl, int ist)
 //
 // handle an interrupt, exception, or system call from user space.
 // called from, and returns to, trampoline.S
-// return value is user satp for trampoline.S to switch to.
+// return value is user cr3 for trampoline.S to switch to.
 //
 uint64
 usertrap(void)
 {
-  panic("usertrap: not ported yet");
+  int which_dev = 0;
+  struct proc *p = myproc();
+
+  // riscv reads the previous mode from sstatus; x86's is
+  // the privilege level of the cs that the CPU saved.
+  if ((p->trapframe->cs & 3) == 0)
+    panic("usertrap: not from user mode");
+
+  // send interrupts and exceptions to kerneltrap(),
+  // since we're now in the kernel.
+  // the x86 counterpart of riscv's w_stvec(kernelvec).
+  lidt(kidt, sizeof(kidt));
+
+  // riscv saves the user program counter (sepc) here.
+  // the CPU already saved it in p->trapframe->rip.
+
+  if (p->trapframe->vector == T_SYSCALL) {
+    // system call
+
+    if (killed(p))
+      kexit(-1);
+
+    // riscv's sepc points to the ecall instruction, so it
+    // adds 4 to return to the next one. the rip that "int"
+    // saves already points to the next instruction.
+
+    // the trap turned interrupts off; enable them only now
+    // that we're done with the trap, as riscv does.
+    intr_on();
+
+    syscall();
+  } else if ((which_dev = devintr(p->trapframe->vector)) != 0) {
+    // ok
+  } else if (p->trapframe->vector == T_PGFLT &&
+             (p->trapframe->err & PFERR_I) == 0 &&
+             vmfault(p->pagetable, p->sz, r_cr2(),
+                     (p->trapframe->err & PFERR_W) ? 0 : 1) != 0) {
+    // page fault on lazily-allocated page.
+    // riscv's scause tells loads (13) from stores (15),
+    // and an instruction fetch (12) is not handled;
+    // x86 has one vector, and the error code tells them
+    // apart.
+  } else {
+    printk("usertrap(): unexpected vector 0x%lx pid=%d\n",
+           p->trapframe->vector, p->pid);
+    printk("            rip=0x%lx err=0x%lx cr2=0x%lx\n", p->trapframe->rip,
+           p->trapframe->err, r_cr2());
+    setkilled(p);
+  }
+
+  if (killed(p))
+    kexit(-1);
+
+  // give up the CPU if this is a timer interrupt.
+  if (which_dev == 2)
+    yield();
+
+  prepare_return();
+
+  // the user page table to switch to, for trampoline.S.
+  // cr3 takes the page table's physical address as it is.
+  uint64 cr3 = (uint64)p->pagetable;
+
+  // return to trampoline.S; cr3 value in rax.
+  return cr3;
 }
 
 //
@@ -136,7 +222,38 @@ usertrap(void)
 void
 prepare_return(void)
 {
-  panic("prepare_return: not ported yet");
+  struct proc *p = myproc();
+
+  // we're about to switch the destination of traps from
+  // kerneltrap() to usertrap(). because a trap from kernel
+  // code to usertrap would be a disaster, turn off interrupts.
+  intr_off();
+
+  // send syscalls, interrupts, and exceptions to uservec in trampoline.S,
+  // through the user IDT, at its address in user space.
+  // the x86 counterpart of riscv's w_stvec(trampoline_uservec).
+  lidt((void *)CPUENTRY_VA(cpuentry.uidt), sizeof(cpuentry.uidt));
+
+  // set up trapframe values that uservec will need when
+  // the process next traps into the kernel.
+  p->trapframe->kernel_cr3 = r_cr3();           // kernel page table
+  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
+  p->trapframe->kernel_trap = (uint64)usertrap;
+
+  // set up the trapframe's rip, cs, rflags, rsp and ss,
+  // which trampoline.S's iretq will use to get to user
+  // space. riscv sets sstatus and sepc instead.
+
+  // user code and stack segments, at privilege level 3
+  // (riscv clears SPP for user mode).
+  p->trapframe->cs = UCODE_SEL;
+  p->trapframe->ss = UDATA_SEL;
+
+  // enable interrupts in user mode.
+  p->trapframe->rflags |= FL_IF;
+
+  // rip and rsp already hold the saved user pc and stack
+  // pointer (riscv writes sepc here).
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,
