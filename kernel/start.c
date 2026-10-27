@@ -2,6 +2,8 @@
 #include "param.h"
 #include "memlayout.h"
 #include "x86.h"
+#include "spinlock.h"
+#include "proc.h"
 #include "defs.h"
 
 void main();
@@ -22,5 +24,13 @@ __attribute__((aligned(16))) char stack0[4096 * NCPU];
 void
 start()
 {
+  // keep a pointer to each CPU's struct cpu in its GS base
+  // register, for mycpu(). riscv keeps the hartid in tp
+  // instead; x86 has no spare register for it, but reading
+  // through gs is one instruction.
+  struct cpu *c = &cpus[r_apicid()];
+  c->self = c;
+  wrmsr(MSR_GS_BASE, (uint64)c);
+
   main();
 }

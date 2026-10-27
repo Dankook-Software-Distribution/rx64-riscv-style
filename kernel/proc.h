@@ -1,25 +1,20 @@
 // Saved registers for kernel context switches.
 struct context {
-  uint64 ra;
+  uint64 ra; // where swtch() resumes (x86's call keeps it on the stack)
   uint64 sp;
 
   // callee-saved
-  uint64 s0;
-  uint64 s1;
-  uint64 s2;
-  uint64 s3;
-  uint64 s4;
-  uint64 s5;
-  uint64 s6;
-  uint64 s7;
-  uint64 s8;
-  uint64 s9;
-  uint64 s10;
-  uint64 s11;
+  uint64 rbx;
+  uint64 rbp;
+  uint64 r12;
+  uint64 r13;
+  uint64 r14;
+  uint64 r15;
 };
 
 // Per-CPU state.
 struct cpu {
+  struct cpu *self;       // This struct, at the GS base (see start.c).
   struct proc *proc;      // The process running on this cpu, or null.
   struct context context; // swtch() here to enter scheduler().
   int noff;               // Depth of push_off() nesting.

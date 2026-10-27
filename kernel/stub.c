@@ -18,88 +18,12 @@
 
 #define NOT_PORTED(name) panic(name ": not ported yet")
 
-// proc.c
-
-struct cpu cpus[NCPU];
-
-// only CPU 0 runs until the other CPUs are started,
-// so these two work without per-CPU registers.
-int
-cpuid()
-{
-  return 0;
-}
-
-struct cpu *
-mycpu(void)
-{
-  return &cpus[0];
-}
-
-// until proc.c is ported there are no processes, so
-// main() boots all the way to the scheduler, which can
-// only wait for interrupts. these behave as proc.c's do
-// with no processes.
-
-// main() calls these while booting, so they cannot panic.
-void procinit(void) { }
-void userinit(void) { }
-
-// there is never a current process.
-struct proc *myproc(void) { return 0; }
-
-// interrupt handlers call this (clockintr(), uartintr(),
-// consoleintr(), virtio_disk_intr()); with no processes,
-// no one is waiting.
-void wakeup(void *chan) { }
-
-// with no processes, there is no other process to run
-// while the kernel (in main()) waits for something, such as
-// the disk, so sleep() just waits for an interrupt, as
-// scheduler() does. every caller checks its condition again
-// when sleep() returns, so it does not matter which
-// interrupt it was. the caller has interrupts off, so one
-// that arrives between its check and hlt waits until sti.
-void sleep_prepare(void *chan) { }
-
-void
-sleep(void)
-{
-  asm volatile("sti; hlt; cli");
-}
-
-// the part of riscv's scheduler() that runs when no
-// process is RUNNABLE: wait for an interrupt. hlt, unlike
-// riscv's wfi, does not wake up while interrupts are off,
-// so turn them on just for it. sti takes effect only after
-// the next instruction, so an interrupt cannot be handled
-// between sti and hlt and leave the CPU halted until the
-// interrupt after it.
-void
-scheduler(void)
-{
-  for (;;)
-    asm volatile("sti; hlt; cli");
-}
-
-void yield(void) { NOT_PORTED("yield"); }
-int kfork(void) { NOT_PORTED("kfork"); }
-void kexit(int status) { NOT_PORTED("kexit"); }
-int kwait(uint64 addr) { NOT_PORTED("kwait"); }
-int kkill(int pid) { NOT_PORTED("kkill"); }
-int killed(struct proc *p) { NOT_PORTED("killed"); }
-int growproc(int n) { NOT_PORTED("growproc"); }
-pagetable_t proc_pagetable(struct proc *p) { NOT_PORTED("proc_pagetable"); }
-void proc_freepagetable(pagetable_t pagetable, uint64 sz) { NOT_PORTED("proc_freepagetable"); }
-int either_copyout(int user_dst, uint64 dst, void *src, uint64 len) { NOT_PORTED("either_copyout"); }
-int either_copyin(void *dst, int user_src, uint64 src, uint64 len) { NOT_PORTED("either_copyin"); }
-void procdump(void) { NOT_PORTED("procdump"); }
-
-// kvmmake() calls this while booting, so it cannot panic.
-// it maps no kernel stacks until proc.c is ported.
-void proc_mapstacks(pagetable_t kpgtbl) { }
-
 // trampoline.S
 
 // kernel.ld requires the trampoline section to be exactly one page.
 __attribute__((section("trampsec"), aligned(PGSIZE))) const char trampoline[PGSIZE];
+
+// forkret() in proc.c jumps to userret in the trampoline page.
+// prepare_return() panics before forkret() gets there, so any
+// address in the page will do until trampoline.S is ported.
+asm(".globl userret\n.set userret, trampoline");

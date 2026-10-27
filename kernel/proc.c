@@ -64,17 +64,17 @@ procinit(void)
 int
 cpuid()
 {
-  int id = r_tp();
+  int id = mycpu() - cpus;
   return id;
 }
 
 // Return this CPU's cpu struct.
 // Interrupts must be disabled.
+// start() put it at this CPU's GS base.
 struct cpu *
 mycpu(void)
 {
-  int id = cpuid();
-  struct cpu *c = &cpus[id];
+  struct cpu *c = (struct cpu *)r_gsptr();
   return c;
 }
 
@@ -144,7 +144,10 @@ found:
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
-  p->context.sp = p->kstack + PGSIZE;
+  // x86 functions expect the stack to be 8 bytes short of
+  // 16-byte alignment on entry, where call pushed its
+  // return address.
+  p->context.sp = p->kstack + PGSIZE - 8;
 
   return p;
 }
