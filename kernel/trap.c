@@ -42,8 +42,10 @@ struct gatedesc kidt[256];
 // a code segment, and the CPU finds trap stacks in the task
 // state segment (TSS). each CPU has its own TSS, so each CPU
 // also needs its own GDT, with an entry that points to it.
-uint64 gdt[NCPU][NGDT];
-struct tss tss[NCPU];
+// a trap from user space reads them with the user page table,
+// so they are in cpuentry, which is mapped at CPUENTRY in
+// every page table, like the trampoline.
+__attribute__((aligned(PGSIZE))) struct cpuentry cpuentry;
 
 // a separate stack for double faults. a double fault often
 // means the kernel stack overflowed into its guard page, so
@@ -67,8 +69,8 @@ void
 trapinithart(void)
 {
   int id = cpuid();
-  uint64 *g = gdt[id];
-  struct tss *t = &tss[id];
+  uint64 *g = cpuentry.gdt[id];
+  struct tss *t = &cpuentry.tss[id];
 
   g[0] = 0;
   g[GDT_KCODE] = SEG_P | SEG_S | SEG_X | SEG_W | SEG_A | SEG_L | SEG_DPL(0);
@@ -81,16 +83,20 @@ trapinithart(void)
   // bitmap, so user code cannot use I/O ports.
   t->iomb = sizeof(struct tss);
 
+  // the CPU finds the GDT and the TSS by virtual address,
+  // in whatever page table is in use, so give it their
+  // addresses at CPUENTRY rather than the kernel's own.
+
   // a TSS descriptor takes two GDT entries, to hold a
   // 64-bit base address.
-  uint64 base = (uint64)t;
+  uint64 base = CPUENTRY_VA(t);
   uint64 limit = sizeof(struct tss) - 1;
   g[GDT_TSS] = (limit & 0xffff) | ((base & 0xffffff) << 16) | SEG_TSS64 |
                SEG_P | (((limit >> 16) & 0xf) << 48) |
                (((base >> 24) & 0xff) << 56);
   g[GDT_TSS + 1] = base >> 32;
 
-  lgdt(g, sizeof(gdt[id]));
+  lgdt((void *)CPUENTRY_VA(g), sizeof(cpuentry.gdt[id]));
   loadsegs(KCODE_SEL, KDATA_SEL);
   ltr(TSS_SEL);
 

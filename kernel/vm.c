@@ -58,6 +58,11 @@ kvmmake(void)
   // the highest virtual address in the kernel.
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 
+  // map the descriptor tables for traps (GDT, TSS, user IDT)
+  // at the same address as in user space. writable, since
+  // ltr marks the TSS busy in the GDT.
+  kvmmap(kpgtbl, CPUENTRY, (uint64)&cpuentry, 2 * PGSIZE, PTE_R | PTE_W);
+
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
 

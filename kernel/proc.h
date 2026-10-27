@@ -23,6 +23,21 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 
+// the x86 descriptor tables that traps from user space need,
+// in the two pages mapped at CPUENTRY in both user and kernel
+// space (see memlayout.h): each CPU's GDT and TSS in the
+// first page, the IDT for user mode in the second.
+struct cpuentry {
+  uint64 gdt[NCPU][NGDT];
+  struct tss tss[NCPU];
+  struct gatedesc uidt[256] __attribute__((aligned(PGSIZE)));
+};
+
+extern struct cpuentry cpuentry;
+
+// the address at CPUENTRY of x, which is in cpuentry.
+#define CPUENTRY_VA(x) (CPUENTRY + ((uint64)(x) - (uint64)&cpuentry))
+
 // per-process data for the trap handling code in trampoline.S.
 // sits in a page by itself just under the trampoline page in the
 // user page table. not specially mapped in the kernel page table.
