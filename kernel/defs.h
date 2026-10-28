@@ -175,6 +175,7 @@ uint64          vmfault(pagetable_t, uint64, uint64, int);
 void            lapicinit(void);
 void            lapiceoi(void);
 void            lapicsettimer(uint32);
+void            lapicstartothers(void);
 
 // ioapic.c
 void            ioapicinit(void);
