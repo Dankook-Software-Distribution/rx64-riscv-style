@@ -47,6 +47,10 @@ kvmmake(void)
   // LAPIC
   kvmmap(kpgtbl, LAPIC, LAPIC, PGSIZE, PTE_R | PTE_W);
 
+  // the page where the other CPUs start, so that
+  // lapicstartothers() can copy their code there.
+  kvmmap(kpgtbl, APENTRY, APENTRY, PGSIZE, PTE_R | PTE_W);
+
   // map kernel text executable and read-only.
   kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
 

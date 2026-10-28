@@ -24,6 +24,7 @@ main()
     trapinithart();     // install kernel trap vector
     ioapicinit();       // set up interrupt controller
     lapicinit();        // ask LAPIC for device and timer interrupts
+    lapicstartothers(); // start the other CPUs
     binit();            // buffer cache
     iinit();            // inode table
     fileinit();         // file table

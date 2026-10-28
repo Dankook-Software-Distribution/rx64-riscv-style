@@ -14,6 +14,7 @@
 // LAPIC registers, as byte offsets from LAPIC.
 // each CPU sees its own LAPIC at the same address.
 #define LAPIC_TPR   0x080 // task priority
+#define LAPIC_ICRLO 0x300 // interrupt command (IPIs), low half
 #define LAPIC_EOI   0x0b0 // end of interrupt
 #define LAPIC_SVR   0x0f0 // spurious interrupt vector
 #define LAPIC_TIMER 0x320 // local vector table (LVT): timer
@@ -26,6 +27,12 @@
 #define SVR_ENABLE 0x100   // turn the LAPIC on
 #define LVT_MASKED 0x10000 // the interrupt is masked
 #define TDCR_DIV1  0xb     // timer counts at its full rate
+
+#define ICR_INIT    0x00500 // INIT IPI: reset the CPU
+#define ICR_STARTUP 0x00600 // startup IPI: run at vector << 12
+#define ICR_DELIVS  0x01000 // the IPI is still being sent
+#define ICR_ASSERT  0x04000 // level: assert
+#define ICR_OTHERS  0xc0000 // to all CPUs except this one
 
 #define Reg(reg) ((volatile uint32 *)(LAPIC + (reg)))
 
@@ -77,4 +84,31 @@ void
 lapiceoi(void)
 {
   *Reg(LAPIC_EOI) = 0;
+}
+
+static void
+lapicipi(uint32 icr)
+{
+  *Reg(LAPIC_ICRLO) = icr;
+  while (*Reg(LAPIC_ICRLO) & ICR_DELIVS)
+    ;
+}
+
+extern char apentry[], apentryend[]; // entry.S
+
+// start the other CPUs at apentry in entry.S, which takes
+// them to _entry. qemu starts every riscv hart at _entry,
+// but x86 CPUs other than the first wait for an INIT IPI
+// and then a startup IPI. sending them to "all except this
+// one" needs no list of the CPUs. real hardware wants
+// delays between the IPIs, but qemu does not; the second
+// startup IPI is for hardware that misses the first.
+void
+lapicstartothers(void)
+{
+  memmove((void *)APENTRY, apentry, apentryend - apentry);
+
+  lapicipi(ICR_OTHERS | ICR_INIT | ICR_ASSERT);
+  for (int i = 0; i < 2; i++)
+    lapicipi(ICR_OTHERS | ICR_STARTUP | ICR_ASSERT | (APENTRY >> 12));
 }
