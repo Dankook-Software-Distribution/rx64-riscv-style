@@ -3,15 +3,21 @@
         # makes the boot CPU jump to _entry in 32-bit
         # protected mode with paging off and interrupts
         # disabled. the other CPUs stay halted until
-        # the kernel starts them.
+        # the boot CPU starts them at apentry (below),
+        # which brings them here the same way.
         # kernel.ld causes the following code to
         # be placed at 0x100000.
 
 #include "x86.h"
+#include "memlayout.h"
 
 // selectors in bootgdt.
 #define BOOT_KCODE 0x08
 #define BOOT_KDATA 0x10
+
+// selectors in apgdt.
+#define AP_CODE32 0x08
+#define AP_DATA32 0x10
 
 // PTE bits for the temporary page table.
 #define BOOT_PTE_P  0x001 // present
@@ -99,6 +105,53 @@ entry64:
         call start
 spin:
         jmp spin
+
+        # the other CPUs start here, in 16-bit real mode
+        # with cs = APENTRY >> 4 and ip = 0, after
+        # lapicstartothers() in lapic.c copies this code
+        # to APENTRY and sends them a startup IPI.
+        # switch to 32-bit protected mode with paging off,
+        # as the PVH loader leaves the boot CPU, and jump
+        # to _entry, so that every CPU goes through
+        # _entry, start() and main(), as on riscv.
+        # this code runs at APENTRY, not where it is
+        # linked, so it uses addresses relative to apentry.
+.code16
+.globl apentry
+apentry:
+        cli
+        movw %cs, %ax
+        movw %ax, %ds
+        lgdtl apgdtdesc - apentry
+        movl %cr0, %eax
+        orl $CR0_PE, %eax
+        movl %eax, %cr0
+        ljmpl $AP_CODE32, $(APENTRY + ap32 - apentry)
+
+.code32
+ap32:
+        # _entry reads bootgdtdesc through ds, whose base
+        # is still APENTRY from real mode.
+        movw $AP_DATA32, %ax
+        movw %ax, %ds
+        movw %ax, %es
+        movw %ax, %ss
+        movl $_entry, %eax
+        jmp *%eax
+
+        # flat 32-bit segments for the jump to _entry.
+        # bootgdt has only a 64-bit code segment.
+.p2align 3
+apgdt:
+        .quad 0                         # null
+        .quad 0x00cf9a000000ffff        # 0x08: code, 32-bit
+        .quad 0x00cf92000000ffff        # 0x10: data
+apgdtdesc:
+        .word apgdtdesc - apgdt - 1     # limit
+        .long APENTRY + (apgdt - apentry) # base
+.globl apentryend
+apentryend:
+.code64
 
         # temporary GDT for the jump to 64-bit mode.
         # the kernel installs its own GDT later.
