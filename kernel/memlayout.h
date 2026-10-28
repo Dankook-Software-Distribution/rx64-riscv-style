@@ -18,6 +18,7 @@
 // through I/O ports, not memory addresses.
 
 // the kernel uses physical memory thus:
+// 00008000 -- APENTRY, the other CPUs' first code
 // 00100000 -- entry.S, then kernel text and data
 // end -- start of kernel page allocation area
 // PHYSTOP -- end RAM used by the kernel
@@ -52,6 +53,13 @@
 // starts at 1MB; RAM ends at 128MB (qemu -m 128M).
 #define KERNBASE 0x100000L
 #define PHYSTOP  (128 * 1024 * 1024)
+
+// qemu starts every riscv hart at _entry, but only the
+// first x86 CPU. the others wait until a startup IPI tells
+// them a page to run in 16-bit real mode, which must be
+// below 1MB. lapicstartothers() copies entry.S's apentry
+// to this page, which nothing else uses.
+#define APENTRY 0x8000
 
 // map the trampoline page to the highest address,
 // in both user and kernel space.
