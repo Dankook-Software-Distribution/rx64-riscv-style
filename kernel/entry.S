@@ -85,9 +85,16 @@ entry64:
         # set up a stack for C.
         # stack0 is declared in start.c,
         # with a 4096-byte stack per CPU.
-        # only the boot CPU (CPU 0) comes through here,
-        # so rsp = stack0 + 4096.
-        movq $(stack0 + 4096), %rsp
+        # rsp = stack0 + ((apicid + 1) * 4096)
+        # riscv reads the hartid from mhartid; x86
+        # has the LAPIC ID in cpuid leaf 1, EBX[31:24].
+        movl $1, %eax
+        cpuid
+        shrl $24, %ebx
+        addl $1, %ebx
+        shll $12, %ebx
+        movq $stack0, %rsp
+        addq %rbx, %rsp
         # jump to start() in start.c
         call start
 spin:
