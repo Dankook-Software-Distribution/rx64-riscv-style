@@ -2,35 +2,35 @@ K=kernel
 U=user
 
 OBJS = \
-  $K/entry.o \
-  $K/start.o \
-  $K/console.o \
-  $K/printk.o \
-  $K/uart.o \
-  $K/kalloc.o \
-  $K/spinlock.o \
-  $K/string.o \
+  $K/arch/x86/entry.o \
+  $K/arch/x86/start.o \
+  $K/drivers/console.o \
+  $K/lib/printk.o \
+  $K/drivers/uart.o \
+  $K/mm/kalloc.o \
+  $K/proc/spinlock.o \
+  $K/lib/string.o \
   $K/main.o \
-  $K/vm.o \
-  $K/proc.o \
-  $K/swtch.o \
-  $K/trampoline.o \
-  $K/trap.o \
-  $K/syscall.o \
-  $K/sysproc.o \
-  $K/bio.o \
-  $K/fs.o \
-  $K/log.o \
-  $K/sleeplock.o \
-  $K/file.o \
-  $K/pipe.o \
-  $K/exec.o \
-  $K/sysfile.o \
-  $K/kernelvec.o \
-  $K/lapic.o \
-  $K/ioapic.o \
-  $K/pci.o \
-  $K/virtio_disk.o
+  $K/mm/vm.o \
+  $K/proc/proc.o \
+  $K/arch/x86/swtch.o \
+  $K/arch/x86/trampoline.o \
+  $K/arch/x86/trap.o \
+  $K/proc/syscall.o \
+  $K/proc/sysproc.o \
+  $K/fs/bio.o \
+  $K/fs/fs.o \
+  $K/fs/log.o \
+  $K/proc/sleeplock.o \
+  $K/fs/file.o \
+  $K/fs/pipe.o \
+  $K/proc/exec.o \
+  $K/fs/sysfile.o \
+  $K/arch/x86/kernelvec.o \
+  $K/arch/x86/lapic.o \
+  $K/arch/x86/ioapic.o \
+  $K/drivers/pci.o \
+  $K/drivers/virtio_disk.o
 
 # x86_64-elf- or x86_64-linux-gnu-
 # perhaps in /opt/cross/bin
@@ -95,16 +95,21 @@ endif
 
 LDFLAGS = -z max-page-size=4096
 
-$K/kernel: $(OBJS) $K/kernel.ld
-	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) 
+# kernel sources include their headers by name, as if they were all
+# in one directory.
+KDIRS = $K $K/arch/x86 $K/drivers $K/fs $K/mm $K/proc $K/lib
+$(OBJS): CFLAGS += $(addprefix -I,$(KDIRS))
+
+$K/kernel: $(OBJS) $K/arch/x86/kernel.ld
+	$(LD) $(LDFLAGS) -T $K/arch/x86/kernel.ld -o $K/kernel $(OBJS) 
 	$(OBJDUMP) -S $K/kernel > $K/kernel.asm
 	$(OBJDUMP) -t $K/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $K/kernel.sym
 
 $K/%.o: $K/%.S
-	$(CC) -g $(DETFLAGS) -c -o $@ $<
+	$(CC) -g $(DETFLAGS) $(addprefix -I,$(KDIRS)) -c -o $@ $<
 
 tags: $(OBJS)
-	etags kernel/*.S kernel/*.c
+	etags $(foreach d,$(KDIRS),$d/*.S $d/*.c)
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
 
@@ -125,7 +130,7 @@ $U/_forktest: $U/forktest.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_forktest $U/forktest.o $U/ulib.o $U/usys.o
 	$(OBJDUMP) -S $U/_forktest > $U/forktest.asm
 
-mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
+mkfs/mkfs: mkfs/mkfs.c $K/fs/fs.h $K/param.h
 	gcc -Wno-unknown-attributes -I. -o mkfs/mkfs mkfs/mkfs.c
 
 # Prevent deletion of intermediate files, e.g. cat.o, after first build, so
@@ -159,11 +164,12 @@ UPROGS=\
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
 
--include kernel/*.d user/*.d
+-include $(addsuffix /*.d,$(KDIRS)) user/*.d
 
 clean: 
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
 	*/*.o */*.d */*.asm */*.sym \
+	$(addsuffix /*.o,$(KDIRS)) $(addsuffix /*.d,$(KDIRS)) \
 	$K/kernel fs.img \
 	mkfs/mkfs .gdbinit \
         $U/usys.S \
@@ -206,4 +212,4 @@ check-qemu-version:
 
 .PHONY: fmt
 fmt:
-	clang-format -i $(wildcard kernel/*.[ch] user/*.[ch] mkfs/*.c)
+	clang-format -i $(wildcard $(addsuffix /*.[ch],$(KDIRS)) user/*.[ch] mkfs/*.c)

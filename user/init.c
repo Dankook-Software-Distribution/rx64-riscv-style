@@ -2,10 +2,10 @@
 
 #include "kernel/types.h"
 #include "kernel/stat.h"
-#include "kernel/spinlock.h"
-#include "kernel/sleeplock.h"
-#include "kernel/fs.h"
-#include "kernel/file.h"
+#include "kernel/proc/spinlock.h"
+#include "kernel/proc/sleeplock.h"
+#include "kernel/fs/fs.h"
+#include "kernel/fs/file.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
 
