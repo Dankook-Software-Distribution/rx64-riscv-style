@@ -7,7 +7,7 @@
 
 #define stat xv6_stat // avoid clash with host struct stat
 #include "kernel/types.h"
-#include "kernel/fs.h"
+#include "kernel/fs/fs.h"
 #include "kernel/stat.h"
 #include "kernel/param.h"
 
@@ -46,7 +46,7 @@ uint ialloc(ushort type);
 void iappend(uint inum, void *p, int n);
 void die(const char *);
 
-// convert to riscv byte order
+// convert to x86 byte order
 ushort
 xshort(ushort x)
 {
