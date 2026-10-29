@@ -46,7 +46,7 @@ uint ialloc(ushort type);
 void iappend(uint inum, void *p, int n);
 void die(const char *);
 
-// convert to riscv byte order
+// convert to x86 byte order
 ushort
 xshort(ushort x)
 {
