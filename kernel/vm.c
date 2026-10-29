@@ -230,8 +230,16 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for (a = va; a < va + npages * PGSIZE; a += PGSIZE) {
-    if ((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
+    if ((pte = walk(pagetable, a, 0)) == 0) { // leaf page table entry allocated?
+      // no leaf page table, so none of the 512 pages (2MB) it
+      // would map are mapped: skip to the last of them.
+      // riscv goes page by page, but x86's MAXVA is 512 times
+      // larger, and after a lazy sbrk() to near MAXVA, page by
+      // page would make exit() take minutes. this way the loop
+      // runs at most as many times as riscv's.
+      a = PGROUNDDOWN(a | ((1L << PXSHIFT(1)) - 1));
       continue;
+    }
     if ((*pte & PTE_V) == 0) // has physical page been allocated?
       continue;
     if (do_free) {
