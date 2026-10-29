@@ -32,7 +32,7 @@ char buf[BUFSZ];
 void
 copyin(char *s)
 {
-  uint64 addrs[] = {0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
+  uint64 addrs[] = {0x100000LL, 0x7fffffffe000, 0x7ffffffff000, 0x800000000000,
                     0xffffffffffffffff};
 
   for (int ai = 0; ai < sizeof(addrs) / sizeof(addrs[0]); ai++) {
@@ -78,8 +78,8 @@ copyin(char *s)
 void
 copyout(char *s)
 {
-  uint64 addrs[] = {0LL,          0x80000000LL, 0x3fffffe000,
-                    0x3ffffff000, 0x4000000000, 0xffffffffffffffff};
+  uint64 addrs[] = {0LL,            0x100000LL,     0x7fffffffe000,
+                    0x7ffffffff000, 0x800000000000, 0xffffffffffffffff};
 
   for (int ai = 0; ai < sizeof(addrs) / sizeof(addrs[0]); ai++) {
     uint64 addr = addrs[ai];
@@ -121,7 +121,7 @@ copyout(char *s)
 void
 copyinstr1(char *s)
 {
-  uint64 addrs[] = {0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
+  uint64 addrs[] = {0x100000LL, 0x7fffffffe000, 0x7ffffffff000, 0x800000000000,
                     0xffffffffffffffff};
 
   for (int ai = 0; ai < sizeof(addrs) / sizeof(addrs[0]); ai++) {
@@ -2470,10 +2470,10 @@ nowrite(char *s)
   int pid;
   int xstatus;
   uint64 addrs[] = {0,
-                    0x80000000LL,
-                    0x3fffffe000,
-                    0x3ffffff000,
-                    0x4000000000,
+                    0x100000LL,
+                    0x7fffffffe000,
+                    0x7ffffffff000,
+                    0x800000000000,
                     0xffffffffffffffff};
 
   for (int ai = 0; ai < sizeof(addrs) / sizeof(addrs[0]); ai++) {
@@ -2711,8 +2711,8 @@ lazy_copy(char *s)
 
   // read() and write() to these addresses should fail.
   unsigned long bad[] = {
-    0x3fffffc000, 0x3fffffd000, 0x3fffffe000,
-    0x3ffffff000, 0x4000000000, 0x8000000000,
+    0x7fffffffc000, 0x7fffffffd000, 0x7fffffffe000,
+    0x7ffffffff000, 0x800000000000, 0x1000000000000,
   };
   for (int i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
     int fd = open("README", 0);
@@ -2790,7 +2790,8 @@ lazy_sbrk(char *s)
     p = sbrklazy(0);
   }
 
-  int n = TRAPFRAME - PGSIZE - (uint64)p;
+  // user memory ends at CPUENTRY, not TRAPFRAME (see memlayout.h).
+  int n = CPUENTRY - PGSIZE - (uint64)p;
 
   char *p1 = sbrklazy(n);
   if (p1 < 0 || p1 != p) {
@@ -2799,8 +2800,8 @@ lazy_sbrk(char *s)
   }
 
   p = sbrk(PGSIZE);
-  if (p < 0 || (uint64)p != TRAPFRAME - PGSIZE) {
-    printf("sbrk(%d) returned %p, not expected TRAPFRAME-PGSIZE\n", PGSIZE, p);
+  if (p < 0 || (uint64)p != CPUENTRY - PGSIZE) {
+    printf("sbrk(%d) returned %p, not expected CPUENTRY-PGSIZE\n", PGSIZE, p);
     exit(1);
   }
 
